@@ -221,3 +221,62 @@ class KeepGoingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import reporting_lines as r  # noqa: E402
+
+
+def _org():
+    return {"sticks": {
+        "hr": {"role": "hr", "reports_to": None, "created_by": None, "active": True},
+        "cos": {"role": "chief_of_staff", "reports_to": None, "created_by": "hr", "active": True},
+        "a": {"role": "x", "reports_to": "cos", "created_by": "hr", "active": True},
+        "b": {"role": "x", "reports_to": "cos", "created_by": "a", "active": True},
+    }}
+
+
+class ReportingLines(unittest.TestCase):
+    def test_ping_goes_to_reports_to_not_creator(self):
+        st = _org()
+        self.assertEqual(r.route_ping(st, "b", "done")["to"], "cos")  # creator is a
+        self.assertEqual(r.route_ping(st, "cos", "x")["to"], "owner")
+
+    def test_stick_cannot_change_own_line(self):
+        st = _org()
+        with self.assertRaises(r.ReportingError):
+            r.set_reports_to(st, "a", "a", None, "promote me")
+        with self.assertRaises(r.ReportingError):
+            r.set_reports_to(st, "hr", "hr", "cos", "self")  # not even HR for itself
+
+    def test_manager_must_go_through_hr(self):
+        st = _org()
+        with self.assertRaises(r.ReportingError):
+            r.set_reports_to(st, "cos", "b", "a", "reshuffle")
+        r.set_reports_to(st, "hr", "b", "a", "b now reports to a")
+        self.assertEqual(r.route_ping(st, "b", "hi")["to"], "a")  # follows at once
+        self.assertEqual(st["log"][-1]["from"], "cos")
+
+    def test_owner_may_and_loops_refused(self):
+        st = _org()
+        r.set_reports_to(st, "owner", "a", None, "promoted")
+        self.assertIsNone(st["sticks"]["a"]["reports_to"])
+        with self.assertRaises(r.ReportingError):
+            r.set_reports_to(st, "owner", "cos", "b", "loop")  # b -> cos already
+        with self.assertRaises(r.ReportingError):
+            r.set_reports_to(st, "owner", "a", "b", " ")
+
+    def test_ping_short_dedupe_inactive_manager(self):
+        st = _org()
+        long = r.route_ping(st, "a", "x" * 400)
+        self.assertEqual(len(long["text"]), r.PING_MAX)
+        self.assertIsNone(r.route_ping(st, "a", "x" * 400, pending=[long]))
+        st["sticks"]["cos"]["active"] = False
+        self.assertEqual(r.route_ping(st, "a", "hi")["to"], "owner")
+
+    def test_create_through_hr_only(self):
+        st = _org()
+        with self.assertRaises(r.ReportingError):
+            r.create_stick(st, "cos", "c", "x", "cos")
+        r.create_stick(st, "hr", "c", "x", "cos")
+        self.assertEqual(st["sticks"]["c"]["reports_to"], "cos")
+        self.assertEqual(st["sticks"]["c"]["created_by"], "hr")
