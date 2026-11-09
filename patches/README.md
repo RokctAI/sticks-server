@@ -8,6 +8,6 @@ Rules:
 - Small and separate: one purpose per patch, a one-line reason in the commit message.
 - Prefer new files over edits inside upstream files (new files never conflict).
 - Anything generally useful goes upstream as a PR to elie222/rakazo from a personal fork, then the
-  patch is dropped here once it lands in a tag. Never PR from the RokctAI/rakazo mirror.
+  patch is dropped here once it lands in a tag. There is no mirror to PR from.
 - Create a patch from a checkout of the pinned tag: commit, then
   `git format-patch -1 -o <this folder> HEAD` and add the file name to `series`.
