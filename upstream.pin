@@ -1,0 +1,9 @@
+# What we run. Single record of the upstream version. Changed only by a reviewed PR
+# (the sync robot proposes it as a draft PR). Plain KEY=VALUE, read by the hub and scripts.
+UPSTREAM_REPO=https://github.com/elie222/rakazo
+TAG=v0.8.0
+COMMIT=747ece9641dcc60c95467ffae8ab2311fb1f3f81
+APP_IMAGE=ghcr.io/elie222/rakazo/app
+APP_IMAGE_DIGEST=sha256:908045c3b393f4d948ea6bed9cd86ab77fd32d467d2fdfa042805b34c5b851ea
+COMPUTER_IMAGE=ghcr.io/elie222/rakazo/computer
+COMPUTER_IMAGE_DIGEST=sha256:59bf835963a0580c8bc442501e2bf61e52553532c80129e1a5adf9e389f1b3ed

@@ -1,0 +1,3 @@
+# Ordered list of patch files in this folder, one per line, applied top to bottom on top of the
+# pinned upstream tag. Empty on purpose: we run stock upstream until a real change is needed.
+# Prefer patches that ADD files (our own adapter, bridge, credits) over edits inside upstream files.

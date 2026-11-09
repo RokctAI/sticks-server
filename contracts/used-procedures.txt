@@ -1,0 +1,55 @@
+# Server procedures our Dart client (agent SDK, lib/src/sticks) calls, as group/name.
+# The sync robot checks every line still exists in the new upstream tag's
+# packages/contracts/src/rpc.ts. When the app starts using another procedure, add it here.
+# Generated 2026-11-09 from agent/dart/lib/src/sticks (remote_stick_data.dart and friends).
+agentSkills/list
+approvalRules/list
+approvalRules/remove
+approvalRules/set
+artifacts/listSpace
+bots/archive
+bots/create
+bots/get
+bots/list
+bots/listArchived
+bots/remove
+bots/restore
+bots/setComputer
+bots/update
+computer/boot
+computer/status
+computer/stop
+connections/list
+groups/create
+groups/get
+groups/list
+memory/list
+memory/remove
+memory/update
+models/list
+models/setDefault
+pages/list
+routines/create
+routines/history
+routines/list
+routines/remove
+routines/testRun
+routines/update
+runs/list
+scratchpad/create
+scratchpad/list
+scratchpad/remove
+scratchpad/update
+search/query
+spaces/create
+spaces/list
+threads/answer
+threads/markRead
+threads/messages
+threads/send
+threads/subscribe
+tickets/list
+tickets/move
+usage/summary
+vault/list
+vault/remove
