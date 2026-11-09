@@ -43,7 +43,7 @@ BLOCKER_PHRASES = (
 
 @dataclass
 class Policy:
-    enabled: bool = False  # off until Ray turns it on for this Stick
+    enabled: bool = False  # off until the owner turns it on for this Stick
     max_tries_without_progress: int = 3
     max_per_day: int = 20
     min_gap_seconds: int = 60

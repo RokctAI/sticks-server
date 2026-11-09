@@ -122,14 +122,14 @@ class SyncTests(unittest.TestCase):
         self.assertIn("RAKAZO_COMPUTER_IMAGE_TAG=v0.9.0\n", render_env.render(pin, allow_unpinned=True))
 
     def test_defaults_block_is_added_once_and_replaced(self):
-        once = d.apply_block("You are Zinhle.")
-        self.assertTrue(once.startswith("You are Zinhle."))
+        once = d.apply_block("You are Example Stick.")
+        self.assertTrue(once.startswith("You are Example Stick."))
         self.assertIn("ticket_create", once)
         self.assertEqual(d.apply_block(once), once)  # idempotent
         edited = once.replace("ticket_create", "XX")
         self.assertEqual(d.apply_block(edited), once)  # edited-away text is restored
         self.assertEqual(d.apply_block(""), d.default_block() + "\n")
-        self.assertEqual(d.remove_block(once).strip(), "You are Zinhle.")
+        self.assertEqual(d.remove_block(once).strip(), "You are Example Stick.")
 
     def test_defaults_block_handles_a_broken_marker(self):
         broken = "Mine.\n" + d.START + "\nhalf"
@@ -142,7 +142,7 @@ class SyncTests(unittest.TestCase):
 def _snap(**kw):
     base = dict(run_status="completed", run_ended_at=100.0, last_message_text="Done with batch 1.",
                 last_message_from_owner=False, last_message_at=100.0,
-                pending_tickets=[{"id": "T1", "title": "Call plumbers", "status": "doing"}],
+                pending_tickets=[{"id": "T1", "title": "Process the list", "status": "doing"}],
                 open_scratchpad=[], spend_today=0.0)
     base.update(kw)
     return k.Snapshot(**base)
@@ -210,7 +210,7 @@ class KeepGoingTests(unittest.TestCase):
         self.assertTrue(d1.send)
         self.assertEqual(len(sent), 1)
         self.assertIn("auto-continue 1/3", sent[0][1])
-        self.assertIn("Call plumbers", sent[0][1])
+        self.assertIn("Process the list", sent[0][1])
         d2, st = k.check_stick(C(), "b1", self.pol, st, now=1010.0, today="2026-11-09")
         self.assertFalse(d2.send)  # within the minimum gap
         self.assertEqual(len(sent), 1)

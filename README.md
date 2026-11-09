@@ -25,7 +25,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 4. Exit code: `0` up to date, `10` newer tag ready (pin move proposed), `20` a patch conflicts,
    `30` the app would break. The pin never moves on `20` or `30`.
 5. Never force-pushes, never writes to upstream, never changes `main` except through a merged PR.
-   A new pin is tested on a test instance before Ray's server. Hub deploys read `upstream.pin`;
+   A new pin is tested on a test instance before the production server. Hub deploys read `upstream.pin`;
    only the control hub controls Docker.
 
 Run it by hand: `python scripts/sync_upstream.py --report report.md` (add `--write-pin` to update the
