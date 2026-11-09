@@ -8,7 +8,8 @@ tested on a live instance**.
 - Upstream has one deployment default (`PI_DEFAULT_PROVIDER` + `PI_DEFAULT_MODEL`) and no ordered
   fallback chain for a Stick's main model. Users can add ordered backups per account in
   Settings > Models, but only the approval checker is documented to use them.
-- Smallest fix: point the default at a router (`PI_DEFAULT_PROVIDER=openrouter`), so one upstream
+- Note: openrouter is already upstream's default, so this alone is not a fix; only the retry count is a real change until tested.
+- Candidate fix: point the default at a router (`PI_DEFAULT_PROVIDER=openrouter`), so one upstream
   provider's limit is absorbed by the router. Raise `MODEL_STREAM_MAX_RETRIES` to 3 for transient failures.
 - Must test: force a 429 on the primary and confirm the run completes on another model. If it does
   not, the next step is a backend retry (our Frappe layer re-sends on another model) or a patch in
