@@ -40,8 +40,8 @@ a template just gives it a starting kit.
 - Selling templates in a marketplace is optional and later; the same versioned rows would serve it.
 - Hub-built: the hub calls `bots/create` with the template's fields. No Rakazo patch.
 
-## How pings and keep-going run: scheduler + queue worker
-Borrowed idea (not the software): a small scheduler apart from the web process, and a queue worker that runs jobs.
+## OPTION UNDER DISCUSSION (not a decision): scheduler + queue worker for pings and keep-going
+Exploring only; nothing here is agreed or built. Borrowed idea (not the software): a small scheduler apart from the web process, and a queue worker that runs jobs.
 - **Scheduler** wakes on a timer. It only looks: which Sticks have open work or are unblocked, and which
   pings are waiting. For each it enqueues ONE job (deduplicated by Stick + kind) and goes back to sleep.
   It never talks to a Stick itself.
