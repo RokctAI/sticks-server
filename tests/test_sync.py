@@ -125,6 +125,7 @@ class SyncTests(unittest.TestCase):
         once = d.apply_block("You are Example Stick.")
         self.assertTrue(once.startswith("You are Example Stick."))
         self.assertIn("ticket_create", once)
+        self.assertIn("attach_file", once)
         self.assertEqual(d.apply_block(once), once)  # idempotent
         edited = once.replace("ticket_create", "XX")
         self.assertEqual(d.apply_block(edited), once)  # edited-away text is restored
