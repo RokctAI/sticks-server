@@ -12,6 +12,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, writes a report. Never pushes. |
 | `scripts/render_env.py` | Prints the image lines (tag + digest) the hub adds to a tenant's `.env`. |
 | `templates/stick-defaults.md` | The default instruction block every Stick gets (use the shared board, work through a list without stopping). Applied by the backend with `scripts/stick_defaults.py`, never by patching upstream's prompt. |
+| `scripts/keep_going.py` | Keep-going loop: when a Stick's run ends with open board tickets or scratchpad items and it is not waiting on the owner, send one "continue". Off per Stick by default; capped tries, per-day count and spend. Policy sample in `deploy/keep-going.sample.json`. Logic and tests only; the backend supplies the client. |
 | `templates/report.md` | Report layout (status, patches, contract check, changelog, what to do). |
 | `deploy/` | Sample settings and compose override (no secrets; settings are agreed one by one first). |
 | `.github/workflows/sync-upstream.yml` | Weekly run that opens a draft PR to move the pin, or an issue when something conflicts. |

@@ -8,6 +8,7 @@ import sync_upstream as s  # noqa: E402
 import render_env  # noqa: E402
 import extract_used_procedures as x  # noqa: E402
 import stick_defaults as d  # noqa: E402
+import keep_going as k  # noqa: E402
 
 LS = """\
 aaa\trefs/tags/v0.8.0
@@ -136,6 +137,86 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(out.count(d.START), 1)
         self.assertEqual(out.count(d.END), 1)
         self.assertIn("Mine.", out)
+
+
+def _snap(**kw):
+    base = dict(run_status="completed", run_ended_at=100.0, last_message_text="Done with batch 1.",
+                last_message_from_owner=False, last_message_at=100.0,
+                pending_tickets=[{"id": "T1", "title": "Call plumbers", "status": "doing"}],
+                open_scratchpad=[], spend_today=0.0)
+    base.update(kw)
+    return k.Snapshot(**base)
+
+
+class KeepGoingTests(unittest.TestCase):
+    pol = k.Policy(enabled=True, max_spend_per_day=100)
+
+    def dec(self, snap=None, pol=None, state=None, now=1000.0):
+        return k.decide(snap or _snap(), pol or self.pol, state or k.StickState(), now, "2026-11-09")
+
+    def test_off_by_default(self):
+        self.assertFalse(k.Policy().enabled)
+        self.assertFalse(self.dec(pol=k.Policy()).send)
+
+    def test_continues_with_open_ticket(self):
+        self.assertTrue(self.dec().send)
+
+    def test_scratchpad_counts_and_can_be_turned_off(self):
+        s = _snap(pending_tickets=[], open_scratchpad=[{"id": "S1", "title": "list"}])
+        self.assertTrue(self.dec(s).send)
+        self.assertFalse(self.dec(s, k.Policy(enabled=True, max_spend_per_day=1, include_scratchpad=False)).send)
+
+    def test_no_pending_work(self):
+        self.assertFalse(self.dec(_snap(pending_tickets=[])).send)
+
+    def test_blocker_by_paused_run_or_question(self):
+        self.assertFalse(self.dec(_snap(run_status="waiting_input")).send)
+        self.assertFalse(self.dec(_snap(run_status="waiting_takeover")).send)
+        self.assertFalse(self.dec(_snap(last_message_text="Which list should I use?")).send)
+        self.assertFalse(self.dec(_snap(last_message_text="Let me know when to go on.")).send)
+        self.assertTrue(self.dec(_snap(last_message_text="Saved 40 of 591. Next batch.")).send)
+
+    def test_failed_cancelled_or_owner_spoke_last(self):
+        self.assertFalse(self.dec(_snap(run_status="failed")).send)
+        self.assertFalse(self.dec(_snap(run_status="cancelled")).send)
+        self.assertFalse(self.dec(_snap(run_status="running")).send)
+        self.assertFalse(self.dec(_snap(last_message_from_owner=True, last_message_at=101.0)).send)
+
+    def test_caps(self):
+        sig = k.signature_of(_snap(), self.pol)
+        st = k.StickState(day="2026-11-09", continues_today=20)
+        self.assertIn("daily", self.dec(state=st).reason)
+        st = k.StickState(last_continue_at=990.0)
+        self.assertIn("too soon", self.dec(state=st).reason)
+        self.assertIn("spend", self.dec(_snap(spend_today=100.0)).reason)
+        self.assertIn("spend", self.dec(pol=k.Policy(enabled=True)).reason)  # no spend allowed by default
+        st = k.StickState(last_signature=sig, tries_on_signature=3)
+        self.assertIn("stalled", self.dec(state=st).reason)
+        # progress (pending work changed) resets the try count
+        st = k.StickState(last_signature="old", tries_on_signature=3)
+        self.assertTrue(self.dec(state=st).send)
+
+    def test_check_stick_sends_once_and_updates_state(self):
+        sent = []
+
+        class C:
+            def snapshot(self, bot_id):
+                return _snap()
+
+            def send(self, bot_id, text, nonce):
+                sent.append((bot_id, text, nonce))
+
+        d1, st = k.check_stick(C(), "b1", self.pol, k.StickState(), now=1000.0, today="2026-11-09")
+        self.assertTrue(d1.send)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("auto-continue 1/3", sent[0][1])
+        self.assertIn("Call plumbers", sent[0][1])
+        d2, st = k.check_stick(C(), "b1", self.pol, st, now=1010.0, today="2026-11-09")
+        self.assertFalse(d2.send)  # within the minimum gap
+        self.assertEqual(len(sent), 1)
+        off = k.check_stick(C(), "b1", k.Policy(), k.StickState(), now=2000.0)[0]
+        self.assertFalse(off.send)
+        self.assertEqual(len(sent), 1)
 
 
 if __name__ == "__main__":

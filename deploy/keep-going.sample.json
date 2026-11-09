@@ -1,0 +1,12 @@
+{
+  "_comment": "Per Stick, keyed by Rakazo bot id. OFF until enabled is true. Spend unit = whatever the backend reports (e.g. US cents). Caps are per Stick.",
+  "default": {
+    "enabled": false,
+    "max_tries_without_progress": 3,
+    "max_per_day": 20,
+    "min_gap_seconds": 60,
+    "max_spend_per_day": 0,
+    "include_scratchpad": true
+  },
+  "sticks": {}
+}
