@@ -4,7 +4,8 @@
 Read-only with respect to every remote: it never pushes and never force-pushes. Upstream is read
 directly from UPSTREAM_REPO in upstream.pin (no mirror dependency; MIRROR_REPO is optional). It clones the new tag into a temporary folder, applies patches/series on top of it, checks
 that every procedure in contracts/used-procedures.txt still exists, collects the upstream
-changelog entries since the pin, and writes a report.
+changelog entries since the pin, compares the pinned version with the new one by area (mobile, web,
+desktop, server, contract, infra...) and writes a report.
 
 Exit codes:
   0   up to date (nothing newer than the pin)
@@ -127,6 +128,89 @@ def changelog_since(changelog: str, pinned_tag: str, new_tag: str, keep=("Change
     return "\n".join(out).strip() or "(no entries under those headings)"
 
 
+# Areas of the upstream repo, first match wins. WATCH areas are the client apps: a change there may be
+# worth bringing to our Sticks app by hand, so the report calls them out.
+AREAS: list[tuple[str, tuple[str, ...], bool]] = [
+    ("Mobile app", ("apps/mobile/",), True),
+    ("Web app", ("apps/web/", "packages/ui-web/", "packages/chat-ui/", "packages/ui-tokens/", "packages/page-kit/"), True),
+    ("Desktop app", ("apps/desktop/",), True),
+    ("API contract (what our app calls)", ("packages/contracts/",), False),
+    (
+        "Server (api, worker, adapters, core, db, auth, memory)",
+        (
+            "apps/api/", "apps/worker/", "packages/adapters/", "packages/adapter-kit/", "packages/core/",
+            "packages/db/", "packages/auth/", "packages/memory/", "packages/logging/",
+        ),
+        False,
+    ),
+    ("Infra and deploy", ("infra/",), False),
+    ("Website", ("apps/www/",), False),
+    ("Tests and tooling", ("packages/testkit/",), False),
+    ("Docs", ("docs/", "README", "CHANGELOG", "VISION"), False),
+]
+
+
+def area_of(path: str) -> str:
+    for label, prefixes, _watch in AREAS:
+        if path.startswith(prefixes):
+            return label
+    return "Other"
+
+
+def summarize_diff(numstat: str) -> dict[str, dict]:
+    """Group `git diff --numstat` output by area: file list, added and removed lines."""
+    out: dict[str, dict] = {}
+    for line in numstat.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        add, rem, path = parts
+        a = out.setdefault(area_of(path), {"files": [], "added": 0, "removed": 0})
+        a["files"].append(path)
+        a["added"] += int(add) if add.isdigit() else 0
+        a["removed"] += int(rem) if rem.isdigit() else 0
+    return out
+
+
+def is_noise(path: str) -> bool:
+    """Tests and translation files: counted in the table, left out of the file list."""
+    return path.endswith((".po", ".test.ts", ".test.tsx", ".test.js", ".spec.ts")) or "/e2e/" in path
+
+
+def format_changes(summary: dict[str, dict], subjects: dict[str, list[str]] | None = None) -> str:
+    """Markdown for the report: a line per area, and details for the watched client apps."""
+    if not summary:
+        return "No file changes between the two versions."
+    order = [a[0] for a in AREAS] + ["Other"]
+    watch = {a[0] for a in AREAS if a[2]}
+    lines = ["| Area | Files | Added | Removed |", "|---|---|---|---|"]
+    for label in order:
+        if label in summary:
+            v = summary[label]
+            mark = " **(check by hand)**" if label in watch else ""
+            lines.append(f"| {label}{mark} | {len(v['files'])} | +{v['added']} | -{v['removed']} |")
+    changed_watch = [l for l in order if l in watch and l in summary]
+    lines.append("")
+    if changed_watch:
+        lines.append(
+            "**CHECK BY HAND: client app code changed (" + ", ".join(changed_watch) + ").** "
+            "Decide whether any of it is worth bringing to the Sticks mobile app. "
+            "Changed files (first 25 per area; tests and translations left out of the list):"
+        )
+        for label in changed_watch:
+            lines.append(f"\n_{label}_")
+            shown = [f for f in summary[label]["files"] if not is_noise(f)]
+            lines.extend(f"- `{f}`" for f in shown[:25])
+            extra = len(shown) - 25
+            if extra > 0:
+                lines.append(f"- ...and {extra} more")
+            for subj in (subjects or {}).get(label, [])[:15]:
+                lines.append(f"  - commit: {subj}")
+    else:
+        lines.append("No change in the mobile, web or desktop apps.")
+    return "\n".join(lines)
+
+
 # ---- git and network ------------------------------------------------------------------------
 
 
@@ -192,6 +276,35 @@ def apply_patches(checkout: Path, patches_dir: Path, series: list[str]) -> tuple
     return applied, problems
 
 
+def compare_versions(checkout: Path, old_tag: str, new_tag: str) -> str:
+    """Which parts of upstream changed between the pinned tag and the new tag (best effort)."""
+    try:
+        r = run(["git", "fetch", "--depth=1", "origin", f"refs/tags/{old_tag}:refs/tags/{old_tag}"], cwd=checkout, check=False)
+        if r.returncode != 0:
+            return f"(could not fetch the pinned tag `{old_tag}` to compare: {r.stderr.strip()[:200]})"
+        numstat = run(["git", "diff", "--numstat", old_tag, new_tag], cwd=checkout).stdout
+        summary = summarize_diff(numstat)
+        subjects: dict[str, list[str]] = {}
+        # Commit subjects since the pin, if the host lets us fetch just that range.
+        d = run(
+            ["git", "fetch", f"--shallow-exclude={old_tag}", "origin", f"refs/tags/{new_tag}:refs/tags/{new_tag}"],
+            cwd=checkout,
+            check=False,
+        )
+        if d.returncode == 0:
+            for label, prefixes, watch in AREAS:
+                if watch and label in summary:
+                    log = run(
+                        ["git", "log", "--format=%s", f"{old_tag}..{new_tag}", "--", *[p.rstrip("/") for p in prefixes]],
+                        cwd=checkout,
+                        check=False,
+                    ).stdout
+                    subjects[label] = [l for l in log.splitlines() if l][:15]
+        return format_changes(summary, subjects)
+    except Exception as exc:  # a failed comparison must not hide the rest of the report
+        return f"(comparison failed: {exc})"
+
+
 def image_digest(image: str, tag: str) -> str:
     """Best effort: manifest digest of an image tag on ghcr.io (anonymous read). '' on any failure."""
     try:
@@ -252,7 +365,7 @@ def main() -> int:
     }
     if tag_key(new_tag) <= tag_key(pinned):
         values.update(status="UP TO DATE", result="Nothing newer than the pin.", patches="-", contract="-",
-                      changelog="-", next_steps="Nothing to do.")
+                      changelog="-", changes="-", next_steps="Nothing to do.")
         emit(values, args.report)
         return 0
 
@@ -285,6 +398,8 @@ def main() -> int:
             code = 30 if code == 10 else code
             contract_txt = "packages/contracts/src/rpc.ts not found: upstream moved its contract; check by hand."
 
+        changes = compare_versions(checkout, pinned, new_tag)
+
         cl = checkout / "CHANGELOG.md"
         changelog = changelog_since(cl.read_text(), pinned, new_tag) if cl.is_file() else "(no CHANGELOG.md)"
 
@@ -300,7 +415,7 @@ def main() -> int:
             status, result = "CONTRACT BREAK", f"`{new_tag}` is newer but the app calls something that no longer exists. The pin does NOT move."
             steps = "Update the Dart client and used-procedures.txt in the same wave, or skip this tag."
         values.update(status=status, result=result, patches=patches_txt, contract=contract_txt,
-                      changelog=changelog, next_steps=steps)
+                      changelog=changelog, changes=changes, next_steps=steps)
         emit(values, args.report)
         return code
     finally:

@@ -1,0 +1,11 @@
+sticks-server
+Copyright (c) 2026 ROKCT INTELLIGENCE (PTY) LTD
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It builds on Rakazo (https://github.com/elie222/rakazo), which is licensed under the Apache
+License, Version 2.0. This repository does not contain Rakazo's source code. It holds a pin to a
+Rakazo release, patches that are applied on top of that release at build time, and scripts that
+check upstream for new releases. Rakazo's own LICENSE and NOTICE stay with Rakazo's source and in
+any image or source distribution built from it; patches here that modify Rakazo files are marked
+as changes in their commit messages.

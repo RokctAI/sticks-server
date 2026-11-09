@@ -73,6 +73,23 @@ class SyncTests(unittest.TestCase):
         self.assertNotIn("unreleased thing", out)
         self.assertNotIn("shiny", out)  # Added is not in the kept headings
 
+    def test_area_grouping_and_watch_flag(self):
+        numstat = "3\t1\tapps/mobile/app/chat.tsx\n10\t0\tapps/web/src/a.tsx\n2\t2\tapps/api/src/x.ts\n-\t-\tapps/www/img.png\n1\t1\tsomething.txt\n"
+        summary = s.summarize_diff(numstat)
+        self.assertEqual(summary["Mobile app"]["added"], 3)
+        self.assertEqual(summary["Web app"]["files"], ["apps/web/src/a.tsx"])
+        self.assertIn("Other", summary)
+        self.assertEqual(summary["Website"]["added"], 0)  # binary file counts as 0
+        text = s.format_changes(summary)
+        self.assertIn("CHECK BY HAND", text)
+        self.assertIn("Mobile app", text)
+        self.assertNotIn("Desktop app", text.split("CHECK BY HAND")[1].split("Changed files")[0])
+
+    def test_no_client_change_message(self):
+        text = s.format_changes(s.summarize_diff("1\t1\tapps/api/src/x.ts\n"))
+        self.assertIn("No change in the mobile, web or desktop apps.", text)
+        self.assertNotIn("CHECK BY HAND", text)
+
     def test_pin_file_and_render(self):
         pin = s.read_pin(Path(__file__).resolve().parent.parent / "upstream.pin")
         self.assertTrue(s.tag_key(pin["TAG"]))

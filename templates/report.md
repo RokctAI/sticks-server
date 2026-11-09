@@ -16,5 +16,8 @@ $contract
 ## Upstream changelog since the pin (Changed / Removed / Fixed headings)
 $changelog
 
+## What changed in upstream, by area (pinned version vs new version)
+$changes
+
 ## What to do
 $next_steps

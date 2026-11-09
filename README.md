@@ -19,7 +19,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 1. The script looks for the newest `vX.Y.Z` tag on upstream (main and `edge` are never followed).
 2. It clones that tag into a temp folder, applies `patches/series` on top, and checks every procedure
    in `contracts/used-procedures.txt` still exists in upstream's `packages/contracts/src/rpc.ts`.
-3. It writes a report with the upstream changelog entries since our pin (Changed / Removed / Fixed).
+3. It writes a report with the upstream changelog entries since our pin (Changed / Removed / Fixed) and a comparison of the pinned version with the new one by area (mobile, web, desktop, server, contract, infra, website...). If the mobile, web or desktop app changed, the report says CHECK BY HAND with the changed files and commit subjects, so someone can decide whether any of it is worth bringing to the Sticks app.
 4. Exit code: `0` up to date, `10` newer tag ready (pin move proposed), `20` a patch conflicts,
    `30` the app would break. The pin never moves on `20` or `30`.
 5. Never force-pushes, never writes to upstream, never changes `main` except through a merged PR.
@@ -33,3 +33,8 @@ pin file when the result is `10`). Tests: `python -m unittest discover -s tests 
 Seeded 2026-11-09. The script and tests were run locally against upstream `v0.8.0` (up to date, newer
 tag, conflicting patch and missing procedure paths all checked). The scheduled workflow is NOT yet
 run on GitHub. Nothing is deployed from here yet.
+
+## Licence
+Apache License 2.0 (see `LICENSE`), the same licence as upstream Rakazo. `NOTICE` records the
+copyright and the upstream attribution. Any build or image made from upstream source plus our
+patches must keep upstream's own LICENSE and NOTICE files.
