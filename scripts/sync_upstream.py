@@ -332,6 +332,9 @@ def write_pin(path: Path, pin: dict[str, str], tag: str, commit: str) -> None:
     pin["TAG"], pin["COMMIT"] = tag, commit
     pin["APP_IMAGE_DIGEST"] = image_digest(pin.get("APP_IMAGE", ""), tag)
     pin["COMPUTER_IMAGE_DIGEST"] = image_digest(pin.get("COMPUTER_IMAGE", ""), tag)
+    missing = [k for k in ("APP_IMAGE_DIGEST", "COMPUTER_IMAGE_DIGEST") if not pin[k]]
+    if missing:  # never write a pin that falls back to a movable tag
+        raise RuntimeError(f"no image digest found for {tag} ({', '.join(missing)}); not writing the pin")
     header = [l for l in path.read_text().splitlines() if l.startswith("#")]
     body = [f"{k}={v}" for k, v in pin.items()]
     path.write_text("\n".join(header + body) + "\n")
@@ -347,6 +350,9 @@ def main() -> int:
     ap.add_argument("--tag", help="test this tag instead of the newest one")
     args = ap.parse_args()
 
+    if args.tag and not tag_key(args.tag):
+        print(f"--tag {args.tag!r} is not a release tag like v0.9.0", file=sys.stderr)
+        return 2
     pin = read_pin(ROOT / "upstream.pin")
     pinned = pin.get("TAG", "")
     if not tag_key(pinned):
@@ -407,7 +413,13 @@ def main() -> int:
             status, result = "NEWER TAG READY", f"`{new_tag}` is newer than `{pinned}` and our patches and contract check pass."
             steps = "Open a DRAFT PR moving the pin (the robot does this), test on a test instance, then let the gatekeeper review."
             if args.write_pin:
-                write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
+                try:
+                    write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
+                except RuntimeError as exc:
+                    code = 2
+                    status, result = "NOT READY", f"`{new_tag}` passes our checks but the pin was NOT written: {exc}."
+                    steps = ("Upstream may not have published images for this tag yet. Wait and re-run; "
+                             "the pin only moves with image digests.")
         elif code == 20:
             status, result = "CONFLICT", f"`{new_tag}` is newer but at least one patch does not apply. The pin does NOT move."
             steps = "Rebase the failing patch on the new tag by hand (or drop it if upstream took the change), update patches/, re-run."

@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import sync_upstream as s  # noqa: E402
 import render_env  # noqa: E402
+import extract_used_procedures as x  # noqa: E402
 
 LS = """\
 aaa\trefs/tags/v0.8.0
@@ -101,6 +102,22 @@ class SyncTests(unittest.TestCase):
         used = s.used_procedures(text)
         self.assertIn("threads/subscribe", used)
         self.assertTrue(all("/" in u for u in used))
+
+    def test_extractor_reads_literals_and_skips_media_types(self):
+        dart = "post('threads/send'); h = 'application/json'; c = 'image/png'; x('bots/list'); y = \"a/b\";"
+        self.assertEqual(x.extract(dart), {"threads/send", "bots/list"})
+
+    def test_checked_in_list_matches_format(self):
+        text = (Path(__file__).resolve().parent.parent / "contracts" / "used-procedures.txt").read_text()
+        listed = x.read_list(text)
+        self.assertEqual(listed, sorted(listed))
+        self.assertGreater(len(listed), 100)
+
+    def test_render_refuses_missing_digest(self):
+        pin = {"TAG": "v0.9.0", "APP_IMAGE": "a", "COMPUTER_IMAGE": "c", "APP_IMAGE_DIGEST": "sha256:1"}
+        with self.assertRaises(ValueError):
+            render_env.render(pin)
+        self.assertIn("RAKAZO_COMPUTER_IMAGE_TAG=v0.9.0\n", render_env.render(pin, allow_unpinned=True))
 
 
 if __name__ == "__main__":

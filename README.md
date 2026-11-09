@@ -8,7 +8,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 |---|---|
 | `upstream.pin` | The one upstream release tag we run (plus commit and image digests). Moves only by reviewed PR. |
 | `patches/` | Our ordered patch set (`series`). Empty today: stock upstream until a real change is needed. |
-| `contracts/used-procedures.txt` | The server calls our Dart app makes. Checked against every new upstream tag. |
+| `contracts/used-procedures.txt` | The server calls our Dart app makes (generated from the Dart source by `scripts/extract_used_procedures.py`). Checked against every new upstream tag. |
 | `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, writes a report. Never pushes. |
 | `scripts/render_env.py` | Prints the image lines (tag + digest) the hub adds to a tenant's `.env`. |
 | `templates/report.md` | Report layout (status, patches, contract check, changelog, what to do). |

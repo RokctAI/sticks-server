@@ -44,3 +44,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create --title "Upstream sync needs attention ($(date +%F))" --body-file report.md
+      - name: Fail when the check itself could not run
+        if: steps.sync.outputs.code == '2' || (steps.sync.outputs.code != '0' && steps.sync.outputs.code != '10' && steps.sync.outputs.code != '20' && steps.sync.outputs.code != '30')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "sync_upstream.py exited with ${{ steps.sync.outputs.code }}"
+          gh issue create --title "Upstream sync could not run ($(date +%F))" --body "The weekly check exited with code ${{ steps.sync.outputs.code }} (environment error, or a tag was ready but its image digests were not). See the run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          exit 1
