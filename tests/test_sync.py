@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import sync_upstream as s  # noqa: E402
 import render_env  # noqa: E402
 import extract_used_procedures as x  # noqa: E402
+import stick_defaults as d  # noqa: E402
 
 LS = """\
 aaa\trefs/tags/v0.8.0
@@ -118,6 +119,23 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             render_env.render(pin)
         self.assertIn("RAKAZO_COMPUTER_IMAGE_TAG=v0.9.0\n", render_env.render(pin, allow_unpinned=True))
+
+    def test_defaults_block_is_added_once_and_replaced(self):
+        once = d.apply_block("You are Zinhle.")
+        self.assertTrue(once.startswith("You are Zinhle."))
+        self.assertIn("ticket_create", once)
+        self.assertEqual(d.apply_block(once), once)  # idempotent
+        edited = once.replace("ticket_create", "XX")
+        self.assertEqual(d.apply_block(edited), once)  # edited-away text is restored
+        self.assertEqual(d.apply_block(""), d.default_block() + "\n")
+        self.assertEqual(d.remove_block(once).strip(), "You are Zinhle.")
+
+    def test_defaults_block_handles_a_broken_marker(self):
+        broken = "Mine.\n" + d.START + "\nhalf"
+        out = d.apply_block(broken)
+        self.assertEqual(out.count(d.START), 1)
+        self.assertEqual(out.count(d.END), 1)
+        self.assertIn("Mine.", out)
 
 
 if __name__ == "__main__":
