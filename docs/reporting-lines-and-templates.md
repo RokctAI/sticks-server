@@ -9,7 +9,7 @@ and `scripts/reporting_lines.py` (tested reference rules) are the spec.
   (`marketplace.catalog`: MCP connectors and skill packs). **No bot/Stick templates and no
   versioning.** Duplicates are copies, not linked to a source.
 
-## Reporting lines (Ray's rulings)
+## Reporting lines (owner's rulings)
 - One `reports_to` per Stick (None = the owner), separate from `created_by`.
 - A ping is a one-line text (140 chars) plus the sender id. It wakes ONLY the `reports_to` Stick
   (or the owner) for one short run. Nothing stays listening; a repeat of a ping still waiting is dropped;
