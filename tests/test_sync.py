@@ -196,6 +196,13 @@ class KeepGoingTests(unittest.TestCase):
         st = k.StickState(last_signature="old", tries_on_signature=3)
         self.assertTrue(self.dec(state=st).send)
 
+    def test_label_resets_when_open_work_changed(self):
+        snap = _snap()
+        same = k.StickState(last_signature=k.signature_of(snap, self.pol), tries_on_signature=2)
+        self.assertIn("auto-continue 3/3", k.continue_text(snap, same, self.pol))
+        changed = k.StickState(last_signature="old", tries_on_signature=2)
+        self.assertIn("auto-continue 1/3", k.continue_text(snap, changed, self.pol))
+
     def test_check_stick_sends_once_and_updates_state(self):
         sent = []
 

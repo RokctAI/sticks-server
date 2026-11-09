@@ -1,5 +1,5 @@
 {
-  "_comment": "Per Stick, keyed by Rakazo bot id. OFF until enabled is true. Spend unit = whatever the backend reports (e.g. US cents). Caps are per Stick.",
+  "_comment": "Per Stick, keyed by Rakazo bot id. OFF until enabled is true. Spend unit = whatever the backend reports (e.g. US cents). Caps are per Stick. NOTE: max_spend_per_day 0 means NO spend is allowed, so nothing is ever sent until it is set above 0.",
   "default": {
     "enabled": false,
     "max_tries_without_progress": 3,
