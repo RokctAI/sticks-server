@@ -39,3 +39,14 @@ a template just gives it a starting kit.
 - The marked default-instruction block (#2) stays separate from the template text.
 - Selling templates in a marketplace is optional and later; the same versioned rows would serve it.
 - Hub-built: the hub calls `bots/create` with the template's fields. No Rakazo patch.
+
+## How pings and keep-going run: scheduler + queue worker
+Borrowed idea (not the software): a small scheduler apart from the web process, and a queue worker that runs jobs.
+- **Scheduler** wakes on a timer. It only looks: which Sticks have open work or are unblocked, and which
+  pings are waiting. For each it enqueues ONE job (deduplicated by Stick + kind) and goes back to sleep.
+  It never talks to a Stick itself.
+- **Worker** takes a job off the queue and does the single thing: send a ping to the manager (`route_ping`)
+  or send a "continue" to a Stick. One short run per job, then nothing stays running.
+- Keep-going caps (`deploy/keep-going.sample.json`) are checked when the scheduler enqueues, so a capped Stick
+  gets no job. A failed job retries a few times, then is dropped and logged.
+- Pings are enqueued immediately by the event that causes them; the scheduler only sweeps for missed ones.
