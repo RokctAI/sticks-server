@@ -1,0 +1,8 @@
+{
+  "_comment": "Offered at tenant setup: the owner can accept, edit or skip. HR is the only Stick (besides the owner) that can change who anyone reports to. Names are placeholders; the owner renames them.",
+  "precreate": [
+    {"id": "hr", "name": "HR", "role": "hr", "reports_to": null},
+    {"id": "chief_of_staff", "name": "Chief of Staff", "role": "chief_of_staff", "reports_to": null}
+  ],
+  "ask_owner_if_no_hr": true
+}
