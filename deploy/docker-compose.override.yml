@@ -1,0 +1,5 @@
+# Our overrides on top of upstream's docker-compose.images.yml. Empty on purpose for now.
+# Add only what must differ (resource ceilings, extra networks, volumes); the pinned image
+# tags and digests arrive through .env (scripts/render_env.py).
+# Never enable upstream's self-updater here: the control hub deploys and upgrades.
+services: {}

@@ -1,0 +1,54 @@
+# Weekly: look for a newer upstream release tag and test our patches against it.
+# UNTESTED on GitHub (the script itself is tested locally). Org Actions minutes may be exhausted;
+# if so run `python scripts/sync_upstream.py` by hand or from the control hub instead.
+name: sync-upstream
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upstream
+        id: sync
+        run: |
+          set +e
+          python3 scripts/sync_upstream.py --write-pin --report report.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+      - name: Draft PR to move the pin
+        if: steps.sync.outputs.code == '10'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(grep '^TAG=' upstream.pin | cut -d= -f2)
+          branch="pin/$tag"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "branch $branch already exists, not touching it"; exit 0
+          fi
+          git config user.name "sync-upstream"
+          git config user.email "sync-upstream@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add upstream.pin
+          git commit -m "Move upstream pin to $tag"
+          git push origin "$branch"
+          gh pr create --draft --base main --head "$branch" --title "Move upstream pin to $tag" --body-file report.md
+      - name: Issue when something conflicts or the app would break
+        if: steps.sync.outputs.code == '20' || steps.sync.outputs.code == '30'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "Upstream sync needs attention ($(date +%F))" --body-file report.md
+      - name: Fail when the check itself could not run
+        if: steps.sync.outputs.code == '2' || (steps.sync.outputs.code != '0' && steps.sync.outputs.code != '10' && steps.sync.outputs.code != '20' && steps.sync.outputs.code != '30')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "sync_upstream.py exited with ${{ steps.sync.outputs.code }}"
+          gh issue create --title "Upstream sync could not run ($(date +%F))" --body "The weekly check exited with code ${{ steps.sync.outputs.code }} (environment error, or a tag was ready but its image digests were not). See the run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          exit 1
