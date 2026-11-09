@@ -25,12 +25,17 @@ and `scripts/reporting_lines.py` (tested reference rules) are the spec.
 - Backend: Frappe holds the field and log (like roles); a thin hook on `bots/create` and the message
   tools enforces it. Rakazo's `parentBotId` stays untouched, so no patch on hot upstream files.
 
-## Stick templates (proposal; makes Sticks sellable)
-A template = instructions + default skills + tool/MCP list + model choice + role + sample routines, with
-NO memory, keys or owner data. Stored in Frappe as `Stick Template` rows, each immutable once published:
-`template_id`, `version` (semver), `changelog`, `min_server_tag`, `published_by`, `price`.
-- Install = create a Stick from `template_id@version` and remember it (`template_id`, `version`).
-- Updating is the owner's choice: the Stick shows "v1.3 available"; we never overwrite a Stick's edits.
-  The default-instruction block is kept separate (marked section) so template updates and ours don't clash.
-- Marketplace later: sellers publish new versions; buyers keep old ones; billing through Rokct Pay.
-- Hub-built, not a Rakazo patch: the hub calls `bots/create` with the template's fields.
+## Stick templates (proposal)
+We run upstream at the pin with our patches on top; no upstream source is copied here.
+A template is the package we pre-create Sticks from: persona, instructions, role, default skills and tools,
+model. It holds no memory, keys or owner data. Today a new Stick starts as an empty "baby" until the user talks;
+a template just gives it a starting kit.
+- Stored in Frappe as `Stick Template` rows: `template_id`, `version` (a whole number, 1, 2, 3), `changelog`.
+  Fixing a problem that traces to a template publishes the next version; old versions are kept, never edited.
+- The BACKEND tracks `template_id` and `version` per Stick. The Stick never sees either: it only sees its own
+  current instructions, so it cannot get confused about which version it is.
+- New Sticks use the latest version. Existing Sticks keep what they were made from; moving one to a newer
+  version is a backend action (owner or HR), and the Stick's own edits are never silently overwritten.
+- The marked default-instruction block (#2) stays separate from the template text.
+- Selling templates in a marketplace is optional and later; the same versioned rows would serve it.
+- Hub-built: the hub calls `bots/create` with the template's fields. No Rakazo patch.
