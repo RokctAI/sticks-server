@@ -38,14 +38,14 @@ def urllib_transport(method: str, url: str, headers: dict[str, str], body: bytes
         return e.code, {k.lower(): v for k, v in (e.headers or {}).items()}, e.read() or b""
 
 
-class RakazoError(Exception):
+class SticksError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(f"{status}: {message}")
         self.status = status
         self.message = message
 
 
-class RakazoClient:
+class SticksClient:
     def __init__(self, base_url: str, token: str | None = None, space_id: str | None = None,
                  transport: Transport = urllib_transport):
         self.base = base_url.rstrip("/")
@@ -54,16 +54,16 @@ class RakazoClient:
         self.transport = transport
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None, transport: Transport = urllib_transport) -> "RakazoClient":
+    def from_env(cls, env: dict[str, str] | None = None, transport: Transport = urllib_transport) -> "SticksClient":
         env = dict(os.environ if env is None else env)
         url = env.get("STICKS_SERVER_URL", "").strip()
         if not url:
-            raise RakazoError(0, "STICKS_SERVER_URL is not set")
+            raise SticksError(0, "STICKS_SERVER_URL is not set")
         client = cls(url, env.get("STICKS_SERVER_TOKEN") or None, env.get("STICKS_SERVER_SPACE") or None, transport)
         if not client.token:
             email, password = env.get("STICKS_SERVER_EMAIL", ""), env.get("STICKS_SERVER_PASSWORD", "")
             if not (email and password):
-                raise RakazoError(0, "set STICKS_SERVER_TOKEN, or STICKS_SERVER_EMAIL and STICKS_SERVER_PASSWORD")
+                raise SticksError(0, "set STICKS_SERVER_TOKEN, or STICKS_SERVER_EMAIL and STICKS_SERVER_PASSWORD")
             client.sign_in(email, password)
         return client
 
@@ -80,7 +80,7 @@ class RakazoClient:
             "POST", f"{self.base}/api/auth/sign-in/email", self._headers(),
             json.dumps({"email": email, "password": password}).encode())
         if not 200 <= status < 300:
-            raise RakazoError(status, "sign-in failed")
+            raise SticksError(status, "sign-in failed")
         token = headers.get("set-auth-token", "")
         if not token:
             try:
@@ -88,7 +88,7 @@ class RakazoClient:
             except ValueError:
                 token = ""
         if not token:
-            raise RakazoError(status, "sign-in returned no session token")
+            raise SticksError(status, "sign-in returned no session token")
         self.token = token
 
     def call(self, procedure: str, payload: Any = None) -> Any:
@@ -97,9 +97,9 @@ class RakazoClient:
         try:
             decoded = json.loads(body) if body else None
         except ValueError:
-            raise RakazoError(status, f"{procedure} returned no JSON") from None
+            raise SticksError(status, f"{procedure} returned no JSON") from None
         if not 200 <= status < 300:
             j = decoded.get("json") if isinstance(decoded, dict) else None
             msg = (j.get("message") or j.get("code")) if isinstance(j, dict) else None
-            raise RakazoError(status, str(msg or f"{procedure} failed"))
+            raise SticksError(status, str(msg or f"{procedure} failed"))
         return decoded.get("json") if isinstance(decoded, dict) and "json" in decoded else decoded

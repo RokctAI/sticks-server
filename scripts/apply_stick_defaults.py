@@ -12,14 +12,14 @@ put the block back where a Stick edited it away.
   python scripts/apply_stick_defaults.py --write    # saves the changes
   python scripts/apply_stick_defaults.py --remove --write   # takes the block out again
 
-Connection settings: see scripts/rakazo_client.py (environment only).
+Connection settings: see scripts/sticks_client.py (environment only).
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
-from rakazo_client import RakazoClient, RakazoError
+from sticks_client import SticksClient, SticksError
 from stick_defaults import apply_block, default_block, remove_block
 
 MAX_INSTRUCTIONS = 20000  # upstream BOT_INSTRUCTIONS_MAX_LENGTH (v0.8.0)
@@ -40,7 +40,7 @@ def planned_changes(bots: list[dict], block: str, remove: bool = False) -> list[
     return out
 
 
-def apply(client: RakazoClient, write: bool, remove: bool = False) -> tuple[list[str], list[str]]:
+def apply(client: SticksClient, write: bool, remove: bool = False) -> tuple[list[str], list[str]]:
     """Returns (changed or would-change Stick names, problems)."""
     bots = client.call("bots/list") or []
     changed, problems = [], []
@@ -56,7 +56,7 @@ def apply(client: RakazoClient, write: bool, remove: bool = False) -> tuple[list
                     "instructions": new,
                     "expectedInstructions": bot.get("instructions") or "",
                 })
-            except RakazoError as exc:
+            except SticksError as exc:
                 problems.append(f"{name}: {exc.message}")
                 continue
         changed.append(name)
@@ -69,9 +69,9 @@ def main() -> int:
     ap.add_argument("--remove", action="store_true", help="take the block out instead of adding it")
     args = ap.parse_args()
     try:
-        client = RakazoClient.from_env()
+        client = SticksClient.from_env()
         changed, problems = apply(client, args.write, args.remove)
-    except RakazoError as exc:
+    except SticksError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     verb = "updated" if args.write else "would update"

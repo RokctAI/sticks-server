@@ -11,7 +11,7 @@ import keep_going as k  # noqa: E402
 import keep_going_runner as r  # noqa: E402
 import setup_tenant as st  # noqa: E402
 import stick_defaults as d  # noqa: E402
-from rakazo_client import RakazoClient, RakazoError  # noqa: E402
+from sticks_client import SticksClient, SticksError  # noqa: E402
 
 TODAY = "2026-11-11"
 NOW = 1794394800.0  # 2026-11-11 11:00 UTC
@@ -41,7 +41,7 @@ class FakeServer:
 
 def client(answers):
     fake = FakeServer(answers)
-    return RakazoClient("https://srv.example", token="t", transport=fake), fake
+    return SticksClient("https://srv.example", token="t", transport=fake), fake
 
 
 class ClientTests(unittest.TestCase):
@@ -57,13 +57,13 @@ class ClientTests(unittest.TestCase):
 
     def test_sign_in_from_env_and_errors(self):
         fake = FakeServer({})
-        c = RakazoClient.from_env({"STICKS_SERVER_URL": "https://srv.example/", "STICKS_SERVER_EMAIL": "a@b.c",
+        c = SticksClient.from_env({"STICKS_SERVER_URL": "https://srv.example/", "STICKS_SERVER_EMAIL": "a@b.c",
                                    "STICKS_SERVER_PASSWORD": "pw"}, transport=fake)
         self.assertEqual(c.token, "tok")
-        with self.assertRaises(RakazoError):
-            RakazoClient.from_env({"STICKS_SERVER_URL": "x"}, transport=fake)
+        with self.assertRaises(SticksError):
+            SticksClient.from_env({"STICKS_SERVER_URL": "x"}, transport=fake)
         c2, _ = client({"bots/update": Exception("Instructions changed")})
-        with self.assertRaises(RakazoError) as ctx:
+        with self.assertRaises(SticksError) as ctx:
             c2.call("bots/update", {})
         self.assertEqual(ctx.exception.message, "Instructions changed")
 

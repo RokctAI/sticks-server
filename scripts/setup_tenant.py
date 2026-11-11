@@ -10,7 +10,7 @@ Server settings (env, e.g. TICKET_BOARD_ENABLED) are the hub's job and are not t
   python scripts/setup_tenant.py --company "Example Holdings"            # dry run
   python scripts/setup_tenant.py --company "Example Holdings" --write
 
-Connection settings: scripts/rakazo_client.py (environment only).
+Connection settings: scripts/sticks_client.py (environment only).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import argparse
 import sys
 
 from apply_stick_defaults import apply as apply_defaults
-from rakazo_client import RakazoClient, RakazoError
+from sticks_client import SticksClient, SticksError
 
 SPACE_NAME_MAX = 60  # upstream spaceName limit (v0.8.0)
 
@@ -30,7 +30,7 @@ def space_name(company: str) -> str:
     return name[:SPACE_NAME_MAX].rstrip()
 
 
-def setup(client: RakazoClient, company: str, write: bool) -> list[str]:
+def setup(client: SticksClient, company: str, write: bool) -> list[str]:
     log = []
     nav = client.call("spaces/list") or {}
     current = nav.get("current") or {}
@@ -56,9 +56,9 @@ def main() -> int:
     ap.add_argument("--write", action="store_true", help="make the changes (default: dry run)")
     args = ap.parse_args()
     try:
-        for line in setup(RakazoClient.from_env(), args.company, args.write):
+        for line in setup(SticksClient.from_env(), args.company, args.write):
             print(line)
-    except (RakazoError, ValueError) as exc:
+    except (SticksError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 0

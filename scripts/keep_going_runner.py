@@ -10,7 +10,7 @@ read. State (counts, cursor) is kept in a small JSON file so restarts do not res
   python scripts/keep_going_runner.py --policy keep-going.json --state keep-going-state.json --interval 60
 
 Policy file: same shape as deploy/keep-going.sample.json ("default" plus per-Stick overrides
-under "sticks", keyed by bot id). Connection settings: scripts/rakazo_client.py (environment).
+under "sticks", keyed by bot id). Connection settings: scripts/sticks_client.py (environment).
 What it reads: runs/list, threads/messages, tickets/list, scratchpad/list, usage/list.
 What it writes: threads/send (the continue message), nothing else.
 """
@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from keep_going import PENDING_TICKET_STATUSES, Policy, Snapshot, StickState, check_stick
-from rakazo_client import RakazoClient, RakazoError
+from sticks_client import SticksClient, SticksError
 
 USAGE_PAGE = 100  # usage/list returns the newest 100 records (upstream v0.8.0)
 
@@ -52,7 +52,7 @@ def spend_today(records: list[dict], bot_id: str, today: str) -> float:
 class ServerSticks:
     """keep_going.Client backed by the Sticks server."""
 
-    def __init__(self, client: RakazoClient, now: float | None = None):
+    def __init__(self, client: SticksClient, now: float | None = None):
         self.client = client
         self.today = time.strftime("%Y-%m-%d", time.gmtime(now or time.time()))
         self._runs: list[dict] | None = None
@@ -115,7 +115,7 @@ def next_batch(enabled_ids: list[str], cursor: str, size: int) -> tuple[list[str
     return batch, batch[-1]
 
 
-def tick(client: RakazoClient, config: dict, state: dict, batch_size: int, now: float | None = None) -> list[str]:
+def tick(client: SticksClient, config: dict, state: dict, batch_size: int, now: float | None = None) -> list[str]:
     """One sweep step. Returns log lines; updates `state` in place."""
     now = time.time() if now is None else now
     bots = [b for b in (client.call("bots/list") or []) if not b.get("archivedAt")]
@@ -127,7 +127,7 @@ def tick(client: RakazoClient, config: dict, state: dict, batch_size: int, now: 
         st = StickState(**state.setdefault("sticks", {}).get(bot_id, {}))
         try:
             decision, st = check_stick(server, bot_id, policy_for(config, bot_id), st, now=now)
-        except RakazoError as exc:
+        except SticksError as exc:
             log.append(f"{bot_id}: skipped ({exc.message})")
             continue
         state["sticks"][bot_id] = dataclasses.asdict(st)
@@ -148,15 +148,15 @@ def main() -> int:
     state_path = Path(args.state)
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     try:
-        client = RakazoClient.from_env()
-    except RakazoError as exc:
+        client = SticksClient.from_env()
+    except SticksError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     while True:
         try:
             for line in tick(client, config, state, max(1, args.batch)):
                 print(line)
-        except RakazoError as exc:
+        except SticksError as exc:
             print(f"tick failed: {exc}", file=sys.stderr)
         state_path.write_text(json.dumps(state, indent=1))
         if args.once:
