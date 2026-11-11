@@ -12,10 +12,10 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, writes a report. Never pushes. |
 | `scripts/render_env.py` | Prints the image lines (tag + digest) the hub adds to a tenant's `.env`. |
 | `templates/stick-defaults.md` | The default instruction block every Stick gets (use the shared board, work through a list without stopping). Applied by the backend with `scripts/stick_defaults.py`, never by patching upstream's prompt. |
-| `scripts/keep_going.py` | Keep-going loop: when a Stick's run ends with open board tickets or scratchpad items and it is not waiting on the owner, send one "continue". Off per Stick by default; capped tries, per-day count and spend. Policy sample in `deploy/keep-going.sample.json`. Logic and tests only; the backend supplies the client. |
+| `scripts/keep_going.py` | Keep-going loop: when a Stick's run ends with open board tickets or scratchpad items and it is not waiting on the owner, send one "continue". On for every Stick by default (each can be switched off); capped tries, per-day count and spend. Policy sample in `deploy/keep-going.sample.json`. Logic and tests only; the backend supplies the client. |
 | `scripts/sticks_client.py` | Small client for the Sticks server API (same wire format as the app). Connection settings from the environment only. |
 | `scripts/apply_stick_defaults.py` | Writes the default instruction block into every active Stick (dry run unless `--write`; refuses to overwrite an edit made at the same moment). |
-| `scripts/keep_going_runner.py` | Runs the keep-going loop against the server as a small sweeper (bounded batch per tick, saved cursor). Only Sticks switched on in the policy are read. The loop ends on complete (board empty) or blocked (with a reason). |
+| `scripts/keep_going_runner.py` | Runs the keep-going loop against the server as a small sweeper (bounded batch per tick, saved cursor). Sticks switched off in the policy are never read. The loop ends on complete (board empty) or blocked (with a reason). |
 | `scripts/setup_tenant.py` | Tenant setup on the server: names the tenant's one space after the company and applies the default instructions. |
 | `templates/report.md` | Report layout (status, patches, contract check, changelog, what to do). |
 | `scripts/reporting_lines.py`, `docs/reporting-lines-and-templates.md` | Reporting lines, pings by role and Stick templates: design and tested reference rules. |

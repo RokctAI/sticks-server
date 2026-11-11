@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Run the keep-going loop against a Sticks server: a small sweeper, no socket per Stick.
 
-Every tick it takes the next few Sticks that are switched on in the policy file (a bounded batch,
-continuing from a saved cursor), reads each one's state from the server and lets
-scripts/keep_going.py decide whether to send one "continue". Sticks not switched on are never
-read. State (counts, cursor) is kept in a small JSON file so restarts do not reset the caps.
+Every tick it takes the next few Sticks that are not switched off in the policy file (the loop is
+on for every Stick by default; a bounded batch, continuing from a saved cursor), reads each one's
+state from the server and lets scripts/keep_going.py decide whether to send one "continue".
+Sticks switched off are never read. State (counts, cursor) is kept in a small JSON file so restarts do not reset the caps.
 
   python scripts/keep_going_runner.py --policy keep-going.json --state keep-going-state.json --once
   python scripts/keep_going_runner.py --policy keep-going.json --state keep-going-state.json --interval 60

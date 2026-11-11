@@ -1,11 +1,11 @@
 {
-  "_comment": "Per Stick, keyed by Rakazo bot id. OFF until enabled is true. Spend unit = whatever the backend reports (e.g. US cents). Caps are per Stick. NOTE: max_spend_per_day 0 means NO spend is allowed, so nothing is ever sent until it is set above 0.",
+  "_comment": "Per Stick, keyed by bot id. ON for every Stick by default; to switch one off add \"<bot id>\": {\"enabled\": false} under sticks. Spend is in US dollars (usage/list costUsd), counted per Stick per day. NOTE: max_spend_per_day 0 means NO spend is allowed, so nothing is sent for that Stick.",
   "default": {
-    "enabled": false,
+    "enabled": true,
     "max_tries_without_progress": 3,
     "max_per_day": 20,
     "min_gap_seconds": 60,
-    "max_spend_per_day": 0,
+    "max_spend_per_day": 5,
     "include_scratchpad": true
   },
   "sticks": {}

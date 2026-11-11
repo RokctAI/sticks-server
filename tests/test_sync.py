@@ -155,9 +155,10 @@ class KeepGoingTests(unittest.TestCase):
     def dec(self, snap=None, pol=None, state=None, now=1000.0):
         return k.decide(snap or _snap(), pol or self.pol, state or k.StickState(), now, "2026-11-09")
 
-    def test_off_by_default(self):
-        self.assertFalse(k.Policy().enabled)
-        self.assertFalse(self.dec(pol=k.Policy()).send)
+    def test_on_by_default_and_can_be_switched_off(self):
+        self.assertTrue(k.Policy().enabled)
+        self.assertTrue(self.dec(pol=k.Policy()).send)
+        self.assertFalse(self.dec(pol=k.Policy(enabled=False)).send)
 
     def test_continues_with_open_ticket(self):
         self.assertTrue(self.dec().send)
@@ -190,7 +191,8 @@ class KeepGoingTests(unittest.TestCase):
         st = k.StickState(last_continue_at=990.0)
         self.assertIn("too soon", self.dec(state=st).reason)
         self.assertIn("spend", self.dec(_snap(spend_today=100.0)).reason)
-        self.assertIn("spend", self.dec(pol=k.Policy(enabled=True)).reason)  # no spend allowed by default
+        self.assertIn("spend", self.dec(_snap(spend_today=5.0), pol=k.Policy()).reason)  # default cap: 5 USD a day
+        self.assertIn("spend", self.dec(pol=k.Policy(max_spend_per_day=0)).reason)  # 0 = no spend allowed
         st = k.StickState(last_signature=sig, tries_on_signature=3)
         self.assertIn("stalled", self.dec(state=st).reason)
         # progress (pending work changed) resets the try count
@@ -222,7 +224,7 @@ class KeepGoingTests(unittest.TestCase):
         d2, st = k.check_stick(C(), "b1", self.pol, st, now=1010.0, today="2026-11-09")
         self.assertFalse(d2.send)  # within the minimum gap
         self.assertEqual(len(sent), 1)
-        off = k.check_stick(C(), "b1", k.Policy(), k.StickState(), now=2000.0)[0]
+        off = k.check_stick(C(), "b1", k.Policy(enabled=False), k.StickState(), now=2000.0)[0]
         self.assertFalse(off.send)
         self.assertEqual(len(sent), 1)
 

@@ -4,7 +4,7 @@
 Rakazo runs one turn per wake and then stops. This is our own piece (not a Rakazo patch). The
 backend calls `check_stick` when a Stick's run ends. It continues the Stick only if ALL hold:
 
-  1. the Stick is switched on in the policy (OFF by default, per Stick);
+  1. the Stick is not switched off in the policy (ON by default; each Stick can be switched off);
   2. the run ended normally (status `completed`; never `waiting_input` / `waiting_takeover` /
      `failed` / `cancelled`, and never while another run is working);
   3. it has pending work: board tickets assigned to it in `todo` or `doing`, or open (not parked,
@@ -49,11 +49,11 @@ BLOCKER_PHRASES = (
 
 @dataclass
 class Policy:
-    enabled: bool = False  # off until the owner turns it on for this Stick
+    enabled: bool = True  # on for every Stick unless switched off for it
     max_tries_without_progress: int = 3
     max_per_day: int = 20
     min_gap_seconds: int = 60
-    max_spend_per_day: float = 0.0  # in whatever unit the caller's spend uses; 0 = no spend allowed
+    max_spend_per_day: float = 5.0  # US dollars (usage/list costUsd) per Stick per day; 0 = no spend allowed
     include_scratchpad: bool = True
 
 

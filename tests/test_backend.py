@@ -170,7 +170,8 @@ class RunnerTests(unittest.TestCase):
         full = [{"botId": "x", "costUsd": 0, "createdAt": TODAY + "T01:00:00Z"}] * r.USAGE_PAGE
         self.assertTrue(math.isinf(r.spend_today(full, "b1", TODAY)))
         self.assertEqual(r.spend_today([{"botId": "b1", "costUsd": 1, "createdAt": "2026-11-10T23:00:00Z"}], "b1", TODAY), 0)
-        self.assertFalse(r.policy_for({"default": {}}, "b1").enabled)
+        self.assertTrue(r.policy_for({"default": {}}, "b1").enabled)  # on by default
+        self.assertFalse(r.policy_for({"sticks": {"b1": {"enabled": False}}}, "b1").enabled)
         self.assertTrue(r.policy_for(CONFIG, "b1").enabled)
         self.assertEqual(k.Decision(False, "x").outcome, "")
 
