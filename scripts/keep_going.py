@@ -141,7 +141,8 @@ def apply_decision(state: StickState, decision: Decision, now: float, today: str
 
 
 def continue_text(snap: Snapshot, state: StickState, policy: Policy) -> str:
-    n = state.tries_on_signature + 1 if state.last_signature else 1
+    same = state.last_signature == signature_of(snap, policy)  # open work unchanged since last continue
+    n = state.tries_on_signature + 1 if same else 1
     nxt = (snap.pending_tickets[0]["title"] if snap.pending_tickets
            else snap.open_scratchpad[0]["title"] if snap.open_scratchpad else "your open work")
     return (
