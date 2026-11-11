@@ -4,7 +4,7 @@
 Rakazo runs one turn per wake and then stops. This is our own piece (not a Rakazo patch). The
 backend calls `check_stick` when a Stick's run ends. It continues the Stick only if ALL hold:
 
-  1. the Stick is switched on in the policy (OFF by default, per Stick);
+  1. the Stick is not switched off in the policy (ON by default; each Stick can be switched off);
   2. the run ended normally (status `completed`; never `waiting_input` / `waiting_takeover` /
      `failed` / `cancelled`, and never while another run is working);
   3. it has pending work: board tickets assigned to it in `todo` or `doing`, or open (not parked,
@@ -15,6 +15,12 @@ backend calls `check_stick` when a Stick's run ends. It continues the Stick only
   5. the caps hold: at most `max_tries_without_progress` continues in a row when the pending
      work has not changed, `max_per_day` per Stick per day, `min_gap_seconds` between continues,
      and `max_spend_per_day` (the caller supplies today's spend).
+
+Goal-loop rule: the loop ends only when the work is COMPLETE (the board shows no open ticket or
+scratchpad item, whatever the Stick says) or BLOCKED with a reason (a blocked ticket's title, the
+paused run, or the question it asked). If the Stick says "done" while the board still shows open
+work, the continue message says so and asks it to finish or mark each item done or blocked.
+Each decision carries `outcome` (continue, complete, blocked, waiting, working, capped, off).
 
 A ticket in `blocked` or `review` is not pending: the Stick says it is blocked by moving the
 ticket to `blocked` (the default instruction in templates/stick-defaults.md tells it to).
@@ -43,11 +49,11 @@ BLOCKER_PHRASES = (
 
 @dataclass
 class Policy:
-    enabled: bool = False  # off until the owner turns it on for this Stick
+    enabled: bool = True  # on for every Stick unless switched off for it
     max_tries_without_progress: int = 3
     max_per_day: int = 20
     min_gap_seconds: int = 60
-    max_spend_per_day: float = 0.0  # in whatever unit the caller's spend uses; 0 = no spend allowed
+    max_spend_per_day: float = 5.0  # US dollars (usage/list costUsd) per Stick per day; 0 = no spend allowed
     include_scratchpad: bool = True
 
 
@@ -70,6 +76,7 @@ class Snapshot:
     last_message_at: float
     pending_tickets: list[dict] = field(default_factory=list)  # {"id","title","status"}
     open_scratchpad: list[dict] = field(default_factory=list)  # {"id","title"}
+    blocked_tickets: list[dict] = field(default_factory=list)  # {"id","title"}: shown as the reason
     spend_today: float = 0.0
 
 
@@ -78,6 +85,10 @@ class Decision:
     send: bool
     reason: str
     signature: str = ""
+    # Goal status, like a /goal loop: continue | complete | blocked | waiting | working | capped | off.
+    # The loop ends only on complete (the board has no open work) or blocked (with a reason);
+    # capped is a safety stop the owner should look at, never reported as complete.
+    outcome: str = ""
 
 
 def looks_blocked(text: str) -> bool:
@@ -92,6 +103,14 @@ def looks_blocked(text: str) -> bool:
     return any(p in low for p in BLOCKER_PHRASES)
 
 
+DONE_CLAIM = re.compile(r"\b(all done|finished|completed?|done)\b", re.I)
+
+
+def claims_done(text: str) -> bool:
+    """The Stick says it is finished. A claim only: the board decides (see continue_text)."""
+    return bool(DONE_CLAIM.search((text or "")[-400:]))
+
+
 def signature_of(snap: Snapshot, policy: Policy) -> str:
     parts = sorted(f"t:{t['id']}:{t.get('status','')}" for t in snap.pending_tickets)
     if policy.include_scratchpad:
@@ -101,32 +120,37 @@ def signature_of(snap: Snapshot, policy: Policy) -> str:
 
 def decide(snap: Snapshot, policy: Policy, state: StickState, now: float, today: str) -> Decision:
     if not policy.enabled:
-        return Decision(False, "off for this Stick")
+        return Decision(False, "off for this Stick", outcome="off")
     if snap.run_status in WORKING_RUN_STATUSES:
-        return Decision(False, "a run is still working")
+        return Decision(False, "a run is still working", outcome="working")
     if snap.run_status in PAUSED_RUN_STATUSES:
-        return Decision(False, f"blocked: run is {snap.run_status} (waiting for the owner)")
+        return Decision(False, f"blocked: run is {snap.run_status} (waiting for the owner)", outcome="blocked")
     if snap.run_status != "completed":
-        return Decision(False, f"run ended as {snap.run_status}; not continuing")
+        outcome = "waiting" if snap.run_status == "none" else "capped"  # none: no run yet
+        return Decision(False, f"run ended as {snap.run_status}; not continuing", outcome=outcome)
     if snap.last_message_from_owner and snap.last_message_at >= snap.run_ended_at:
-        return Decision(False, "the owner wrote after the run ended; their message comes first")
+        return Decision(False, "the owner wrote after the run ended; their message comes first", outcome="waiting")
     pending = bool(snap.pending_tickets) or (policy.include_scratchpad and bool(snap.open_scratchpad))
     if not pending:
-        return Decision(False, "no open tickets or scratchpad items")
+        if snap.blocked_tickets:
+            titles = "; ".join(t.get("title", "") for t in snap.blocked_tickets[:3])
+            return Decision(False, f"blocked: {titles}", outcome="blocked")
+        return Decision(False, "complete: no open tickets or scratchpad items", outcome="complete")
     if looks_blocked(snap.last_message_text):
-        return Decision(False, "blocked: last message asks the owner something")
+        tail = " ".join(snap.last_message_text.split())[-160:]
+        return Decision(False, f"blocked: last message asks the owner: {tail}", outcome="blocked")
     sig = signature_of(snap, policy)
     count_today = state.continues_today if state.day == today else 0
     if count_today >= policy.max_per_day:
-        return Decision(False, f"daily cap reached ({policy.max_per_day})", sig)
+        return Decision(False, f"daily cap reached ({policy.max_per_day})", sig, "capped")
     if now - state.last_continue_at < policy.min_gap_seconds:
-        return Decision(False, "too soon after the last continue", sig)
+        return Decision(False, "too soon after the last continue", sig, "waiting")
     if snap.spend_today >= policy.max_spend_per_day:
-        return Decision(False, "spend cap reached for today", sig)
+        return Decision(False, "spend cap reached for today", sig, "capped")
     tries = state.tries_on_signature if state.last_signature == sig else 0
     if tries >= policy.max_tries_without_progress:
-        return Decision(False, f"stalled: {tries} continues without the open work changing", sig)
-    return Decision(True, "open work and not blocked", sig)
+        return Decision(False, f"stalled: {tries} continues without the open work changing", sig, "capped")
+    return Decision(True, "open work and not blocked", sig, "continue")
 
 
 def apply_decision(state: StickState, decision: Decision, now: float, today: str) -> StickState:
@@ -145,6 +169,13 @@ def continue_text(snap: Snapshot, state: StickState, policy: Policy) -> str:
     n = state.tries_on_signature + 1 if same else 1
     nxt = (snap.pending_tickets[0]["title"] if snap.pending_tickets
            else snap.open_scratchpad[0]["title"] if snap.open_scratchpad else "your open work")
+    if claims_done(snap.last_message_text):
+        # Completion is checked against the board, not taken from the Stick's word.
+        open_titles = "; ".join(t["title"] for t in (snap.pending_tickets or snap.open_scratchpad)[:3])
+        return (
+            f"{MARKER} {n}/{policy.max_tries_without_progress}] You said this is done, but these are still "
+            f"open: {open_titles}. Finish them, or set each one to done, or to blocked with the reason."
+        )
     return (
         f"{MARKER} {n}/{policy.max_tries_without_progress}] Continue with your open work, next: {nxt}. "
         "Keep going without waiting for me. If you are blocked on something only I can decide, "
@@ -164,7 +195,7 @@ def check_stick(client: Client, bot_id: str, policy: Policy, state: StickState,
     now = time.time() if now is None else now
     today = today or time.strftime("%Y-%m-%d", time.gmtime(now))
     if not policy.enabled:  # do not even read the Stick's data when it is off
-        return Decision(False, "off for this Stick"), state
+        return Decision(False, "off for this Stick", outcome="off"), state
     snap = client.snapshot(bot_id)
     decision = decide(snap, policy, state, now, today)
     if decision.send:
