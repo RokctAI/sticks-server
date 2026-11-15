@@ -4,3 +4,4 @@
 0001-pool-idle-timeout-option.patch
 0002-refuse-second-organization-and-space.patch
 0003-cut-app-level-modules.patch
+0004-cut-messaging.patch
