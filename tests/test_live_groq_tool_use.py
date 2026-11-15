@@ -50,6 +50,27 @@ def chat(payload: dict) -> dict:
 
 
 @unittest.skipUnless(KEY, "GROQ_API_KEY is not set: the live tool-use check is skipped")
+class GroqKey(unittest.TestCase):
+    def test_key_is_accepted_by_the_models_endpoint(self):
+        # GET /models: 200 for a valid key, 401 for an invalid one, 403 when the key lacks access.
+        request = urllib.request.Request(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {KEY}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                status = response.status
+                ids = [m.get("id") for m in json.loads(response.read().decode("utf-8")).get("data", [])]
+        except urllib.error.HTTPError as error:
+            print(f"RESULT /models: HTTP {error.code}")
+            self.fail(f"/models answered HTTP {error.code}")
+        print(f"RESULT /models: HTTP {status}, {len(ids)} models visible")
+        self.assertIn("llama-3.3-70b-versatile", ids)
+        self.assertIn("groq/compound", ids)
+
+
+@unittest.skipUnless(KEY, "GROQ_API_KEY is not set: the live tool-use check is skipped")
 class GroqToolUse(unittest.TestCase):
     def test_each_model_calls_the_tool_with_schema_valid_arguments(self):
         for model in MODELS:
