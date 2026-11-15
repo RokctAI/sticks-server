@@ -27,7 +27,8 @@ export type EngineStartOptions = {
  */
 export async function startEngine(options: EngineStartOptions = {}): Promise<AppHandles> {
   const env = options.env ?? process.env;
-  const dir = options.secretsDir ?? SECRETS_DIR;
+  // STICKS_SECRETS_DIR lets a measurement run point at a temp folder; the product uses /run/secrets.
+  const dir = options.secretsDir ?? env.STICKS_SECRETS_DIR ?? SECRETS_DIR;
   const base = env.STICKS_DATABASE_URL?.trim();
   if (!base) throw new Error("STICKS_DATABASE_URL is required");
 
