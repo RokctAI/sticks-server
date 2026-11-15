@@ -24,10 +24,13 @@ const MAX_COMMAND_CHARS = 10_000;
 /** Runs one shell command in the Stick's folder with the minimal environment, under a wall-clock limit. */
 function runCommand(home: string, command: string, timeoutMs: number) {
   return new Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }>((resolve, reject) => {
+    // detached: the shell becomes the leader of its own process group, so a timeout can kill every
+    // process the command started (a `sleep` inside the shell holds the output pipe open otherwise).
     const child = spawn("/bin/sh", ["-c", command], {
       cwd: home,
       env: minimalEnv(home),
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
@@ -38,7 +41,13 @@ function runCommand(home: string, command: string, timeoutMs: number) {
     };
     child.stdout.on("data", collect(out));
     child.stderr.on("data", collect(err));
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const timer = setTimeout(() => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    }, timeoutMs);
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
