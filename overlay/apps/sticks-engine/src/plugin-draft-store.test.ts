@@ -37,8 +37,8 @@ const spec = {
   info: { title: "Weather" },
   servers: [{ url: "https://api.weather.example" }],
   paths: {
-    "/forecast": { get: { operationId: "getForecast" } },
-    "/alerts": { post: { operationId: "createAlert" } },
+    "/forecast": { get: { operationId: "get_forecast" } },
+    "/alerts": { post: { operationId: "create_alert" } },
   },
 };
 
@@ -70,8 +70,8 @@ describe("approval and the call gate (brief task 21, settled rule: Sticks Admin)
   it("a draft cannot be called: the gate refuses every operation", async () => {
     const repo = sqlDraftRepository(fakeQuery().query);
     await saveDraft(repo, draftFromOpenApi("weather", spec));
-    expect(await callGateForStored(repo, "weather", "getForecast")).toBe("refuse");
-    expect(await callGateForStored(repo, "weather", "createAlert")).toBe("refuse");
+    expect(await callGateForStored(repo, "weather", "get_forecast")).toBe("refuse");
+    expect(await callGateForStored(repo, "weather", "create_alert")).toBe("refuse");
   });
 
   it("a Sticks Member cannot approve, and the draft stays a draft", async () => {
@@ -81,12 +81,12 @@ describe("approval and the call gate (brief task 21, settled rule: Sticks Admin)
     expect((await repo.get("weather"))?.status).toBe("draft");
   });
 
-  it("a Sticks Admin approves; reads then run and writes ask", async () => {
+  it("a Sticks Admin approves; reads then run and writes ask (upstream name rule: get_/list_ etc. as words)", async () => {
     const repo = sqlDraftRepository(fakeQuery().query);
     await saveDraft(repo, draftFromOpenApi("weather", spec));
     await approveStoredDraft(repo, "weather", ADMIN_ROLE);
-    expect(await callGateForStored(repo, "weather", "getForecast")).toBe("run");
-    expect(await callGateForStored(repo, "weather", "createAlert")).toBe("ask");
+    expect(await callGateForStored(repo, "weather", "get_forecast")).toBe("run");
+    expect(await callGateForStored(repo, "weather", "create_alert")).toBe("ask");
     expect(await callGateForStored(repo, "weather", "noSuchOperation")).toBe("refuse");
   });
 
@@ -96,7 +96,7 @@ describe("approval and the call gate (brief task 21, settled rule: Sticks Admin)
     await approveStoredDraft(repo, "weather", ADMIN_ROLE);
     await saveDraft(repo, draftFromOpenApi("weather", spec));
     expect((await repo.get("weather"))?.status).toBe("draft");
-    expect(await callGateForStored(repo, "weather", "getForecast")).toBe("refuse");
+    expect(await callGateForStored(repo, "weather", "get_forecast")).toBe("refuse");
   });
 
   it("approving a plugin that was never saved is refused", async () => {
