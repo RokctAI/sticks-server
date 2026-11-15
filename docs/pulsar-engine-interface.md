@@ -70,4 +70,27 @@ task 9, not an open question. Until it lands the routes stay as they are.
 
 - Settings from Pulsar (task 11): `POST /internal/settings`.
 - Credits from Pulsar (task 12): `credits.reserve`, `credits.extend`, `credits.settle`.
-- Engram (task 18): the end-of-day memory call.
+- Engram (task 18): the end-of-day memory call, section 5.
+
+## 5. Engram: the end-of-day memory call (task 18; Pulsar side not built)
+
+Once a day per tenant the engine summarises each chat active that day, writes the lasting facts to Engram
+through Pulsar, then clears that chat's working context. The job is held in `next_wake_at` (spec 7.6); it
+has no timer of its own. Implementation: `overlay/apps/sticks-engine/src/end-of-day.ts` (`runEndOfDay`,
+`nextEndOfDayAt`), tested against a fake of every dependency.
+
+**Call (engine to Pulsar):** `engram.remember`, one per chat per day.
+
+```json
+{ "tenant": "<tenant id>", "chat": "<chat id>", "day": "2026-11-15", "facts": "<summary text>" }
+```
+
+- Sent over the same unix socket as credits (`STICKS_PULSAR_SOCKET`), with the per-tenant secret.
+- Success: Pulsar stores the facts in Engram for that tenant. Failure: the engine keeps the chat's
+  working context and retries on the next run. The context is cleared only after success.
+- The transport and the Pulsar endpoint are a core-side build. Until it exists the engine uses a fake.
+- External memory providers (Supermemory, Serenity, Honcho) stay switched off in the Sticks build, so
+  memory does not leave the tenant.
+
+**Not in this PR:** the wiring from `runEndOfDay` to the real `next_wake_at` item and to the gateway
+summariser, both of which depend on code in upstream and on the boot pass (task 7).
