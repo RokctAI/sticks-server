@@ -57,6 +57,32 @@ export const STICKS_ROLE_MAP: Readonly<Record<string, "owner" | "admin" | "membe
   "Sticks Member": "member",
 };
 
+/** The sender kind Pulsar signs with for a tenant's engine (settled 11-15, docs/pulsar-engine-interface.md). */
+export const SETTLED_SENDER_KIND = "site";
+
+/** The expected sender for this tenant: kind "site", id the tenant's site host name (STICKS_TENANT_SITE). */
+export function senderFromTenantSite(siteHost: string): { kind: string; id: string } {
+  const id = siteHost.trim();
+  if (!id) throw new PulsarTokenError("malformed", "STICKS_TENANT_SITE is empty");
+  return { kind: SETTLED_SENDER_KIND, id };
+}
+
+/**
+ * Reads the engine token from an Authorization header: `Bearer <base64url of the JSON envelope>`
+ * (settled 11-15). Returns the parsed envelope; verifyPulsarToken checks it.
+ */
+export function envelopeFromAuthorization(header: string | undefined): unknown {
+  const token = /^Bearer ([A-Za-z0-9_-]+)$/.exec(header ?? "")?.[1];
+  if (!token) throw new PulsarTokenError("malformed", "Authorization is not Bearer <base64url>");
+  try {
+    // base64url mapped to base64 by hand: the Node types upstream compiles against do not list "base64url".
+    const standard = token.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(Buffer.from(standard, "base64").toString("utf8")) as unknown;
+  } catch {
+    throw new PulsarTokenError("malformed", "token is not base64url JSON");
+  }
+}
+
 /** Canonical JSON: keys sorted at every level, no spaces, UTF-8 (matches core's _canonical). */
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
