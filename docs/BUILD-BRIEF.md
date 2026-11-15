@@ -4,7 +4,8 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
-## Rules that matter most
+## Rules
+- Branch names start with `rokct/`, never `kilo/` (owner, 11-15). that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
    - Reading upstream code is fine: open it on GitHub, or `git clone` it and only read the files. Installing or building it is not.
    - No pnpm, node, npm, vitest, Docker, Postgres, the engine or the Python tests.
@@ -13,7 +14,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
    - Read the result with `gh pr checks <n>`, and the failure log with `gh run view <id> --log-failed`.
    - Fix and push until it is green. A task is done only when CI is green.
 3. **One task = one draft PR to `main`.**
-   - Branch `kilo/<topic>`, made from the latest `main`.
+   - Branch `rokct/<topic>`, made from the latest `main`.
    - Never stacked, never force-pushed, never pushed to `main`.
    - Do not edit `.github/workflows/ci.yml`.
 4. **Fork forever.** We never follow upstream after v0.11.0. Overlay files may replace upstream files.
@@ -75,7 +76,7 @@ Where a task here needs one of these, build our side against a fake in the tests
 ## Rules (all tasks)
 
 1. **One task = one draft PR to `main`.**
-   - Branch `kilo/<short-topic>`, made from the latest `main`.
+   - Branch `rokct/<short-topic>`, made from the latest `main`.
    - No stacked PRs: never branch from another unmerged branch.
    - If a task says "needs task N merged", wait until it is merged on `main`.
 2. **Never force-push. Never push to `main`.** Never open a PR or issue on `elie222/rakazo`.
@@ -154,7 +155,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - Endpoints: `GET /health`.
 - Test: a vitest that starts the root against a test database (use upstream's `packages/testkit`), sends one message and sees one run complete.
 
-### Task 5b: DONE (merged as #14). pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch kilo/engine-pool-ip)
+### Task 5b: DONE (merged as #14). pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch rokct/engine-pool-ip)
 - **Pool idle close:** change upstream's `packages/db/src/client.ts` directly (patch in `patches/` or an overlay file replacing it; we never follow upstream). Make `idleTimeoutMillis` an option of `createPool`, default unchanged (0). The engine root passes 30000. Add a vitest case that the option reaches the pool.
 - **Overlay typecheck:** in `scripts/build_engine.py`, after the overlay is copied, run `tsc --noEmit` over our overlay files with a tsconfig in `overlay/` that extends upstream's base config. A type error fails the build. Do not edit ci.yml: the Engine job already runs build_engine.py.
 - **Client abort:** in serve.ts, when the client disconnects mid-stream (req "close"), cancel the response body stream and stop reading; add a test.
@@ -171,17 +172,17 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 ### Task 6b: split into three PRs, in this order (decided; do not ask again)
 Do each as its own draft PR. After each one, record the idle RSS [measured] from CI in the PR. If after any step RSS is at or under 150 MB, mark the remaining 6b steps "skipped, target met" and move to task 7.
 
-#### Task 6b-1: measure the built engine (needs 6; branch kilo/measure-built)
+#### Task 6b-1: measure the built engine (needs 6; branch rokct/measure-built)
 - In `scripts/measure_engine.py`, bundle the engine entry with esbuild (already in upstream's dev dependencies; if not, use the version upstream's lockfile has) into one file, with workspace packages bundled and node_modules external. Run it with plain `node`, not tsx.
 - Report both numbers in the summary: tsx RSS and built RSS, [measured].
 - Change only the measure script and its test.
 
-#### Task 6b-2: cut messaging (needs 6b-1; branch kilo/cut-messaging)
+#### Task 6b-2: cut messaging (needs 6b-1; branch rokct/cut-messaging)
 - Spec §11.2: messaging apps and the team-chat bridge go. `messaging/status` stays and answers "none".
 - One patch (`patches/0004-...`) touching: app.ts, the router deps, `routes/messaging.ts`, the team-chat judge and inbound paths, the thread-send path, and the account-import hooks. Where code needs a messaging object, pass a no-op object that does nothing and reports "none"; that keeps type changes small.
 - CI typecheck is your compiler: push, read the tsc errors with `gh run view --log-failed`, fix, push again. Several CI rounds are expected and fine.
 
-#### Task 6b-3: lazy providers in the adapters barrel (needs 6b-2; branch kilo/lazy-adapters)
+#### Task 6b-3: lazy providers in the adapters barrel (needs 6b-2; branch rokct/lazy-adapters)
 - Do NOT rewrite the 73 importers. Patch only `@rakazo/adapters`' barrel index: for the providers Sticks does not use at idle (APNs, Expo push, Stripe, mail, and any other large SDK the RSS shows), replace the eager re-export with a small wrapper that imports the SDK with `await import()` the first time it is used. Exported names and types stay the same, so importers still compile.
 - One PR. If more is needed after measuring, open one more PR for the next provider group.
 
