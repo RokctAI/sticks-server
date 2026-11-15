@@ -128,5 +128,28 @@ class GroqToolUse(unittest.TestCase):
                 )
 
 
+@unittest.skipUnless(KEY, "GROQ_API_KEY is not set: the live checks are skipped")
+class GroqRequestSize(unittest.TestCase):
+    """Sends one oversized request to each chat model. Groq's error for an oversized request states the limit."""
+
+    def test_request_size_limit_per_model(self):
+        filler = "The quick brown fox jumps over the lazy dog. " * 6000  # about 270 KB of text
+        for model in [m["id"] for m in chat_models()]:
+            with self.subTest(model=model):
+                try:
+                    _request(
+                        "/chat/completions",
+                        {
+                            "model": model,
+                            "messages": [{"role": "user", "content": filler}],
+                            "max_completion_tokens": 1,
+                            "temperature": 0,
+                        },
+                    )
+                    print(f"RESULT size {model}: accepted the oversized request")
+                except AssertionError as error:
+                    print(f"RESULT size {model}: {error}")
+
+
 if __name__ == "__main__":
     unittest.main()
