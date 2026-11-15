@@ -2,3 +2,5 @@
 # pinned upstream tag. Keep it short: each line is a real change we need in an upstream file.
 # Prefer patches that ADD files (our own adapter, bridge, credits) over edits inside upstream files.
 0001-pool-idle-timeout-option.patch
+0002-refuse-second-organization-and-space.patch
+0003-cut-app-level-modules.patch

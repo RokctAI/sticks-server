@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -48,6 +48,26 @@ describe("sticks engine root (one process, shared Postgres, scripted model)", ()
     await rm(dataDir, { recursive: true, force: true });
   });
 
+  it("keeps every procedure the app calls routed (none answers 404)", async () => {
+    // The list the Sticks app calls (checked against upstream's contract by the sync robot before).
+    const text = await readFile(new URL("../../../sticks-contracts/used-procedures.txt", import.meta.url), "utf8");
+    const procedures = text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    expect(procedures.length).toBeGreaterThan(100);
+    const missing: string[] = [];
+    for (const procedure of procedures) {
+      const response = await handles.app.request(`/rpc/${procedure}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: {} }),
+      });
+      if (response.status === 404) missing.push(procedure);
+    }
+    expect(missing).toEqual([]);
+  }, 120_000);
+
   it("answers the health check", async () => {
     const response = await handles.app.request("/health");
     expect(response.status).toBe(200);
@@ -91,4 +111,27 @@ describe("sticks engine root (one process, shared Postgres, scripted model)", ()
     }
     expect(statuses).toEqual(["completed"]);
   }, 300_000);
+
+  it("refuses organizations/create and spaces/create with a clear error (spec 5.2)", async () => {
+    const signup = await handles.app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({
+        email: `refuse-${Date.now()}@sticks.test`,
+        password: "test-password-123",
+        name: "Refusal tester",
+      }),
+    });
+    const cookie = sessionCookieHeader(signup);
+    for (const procedure of ["organizations/create", "spaces/create"]) {
+      const response = await handles.app.request(`/rpc/${procedure}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, origin: ORIGIN },
+        body: JSON.stringify({ json: { name: "Another" } }),
+      });
+      const body = (await response.json()) as { json?: { code?: string; message?: string } };
+      expect(body.json?.code, procedure).toBe("FORBIDDEN");
+      expect(body.json?.message, procedure).toContain("is not available");
+    }
+  }, 120_000);
 });

@@ -76,6 +76,11 @@ def overlay_typecheck_projects(files: list[str]) -> list[str]:
     return [f for f in files if f.startswith("apps/") and f.endswith("/tsconfig.json")]
 
 
+def unexplained_tsc_failure(returncode: int, output: str) -> bool:
+    """tsc failed but said nothing we can attribute: no `error TS` line at all (a crash, or a changed format)."""
+    return returncode != 0 and "error TS" not in output
+
+
 def overlay_type_errors(output: str, project_dir: str) -> list[str]:
     """The tsc lines that are ours to fix: errors in files under project_dir, and config-level errors.
 
@@ -193,6 +198,11 @@ def main() -> int:
         dest = checkout / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(OVERLAY / rel, dest)
+    # The procedures our app calls, for the overlay routing test (task 6). Test input only, not code.
+    contracts = ROOT / "contracts" / "used-procedures.txt"
+    if contracts.is_file():
+        (checkout / "sticks-contracts").mkdir(exist_ok=True)
+        shutil.copyfile(contracts, checkout / "sticks-contracts" / "used-procedures.txt")
 
     engines = upstream_engines_node((checkout / "package.json").read_text(encoding="utf-8"))
     node_v = node_version()
@@ -221,10 +231,16 @@ def main() -> int:
     for project in overlay_typecheck_projects(overlay_list):
         step(f"overlay typecheck: tsc --noEmit -p {project}")
         r = up.run([pnpm, "exec", "tsc", "--noEmit", "--pretty", "false", "-p", project], cwd=checkout, check=False)
-        ours = overlay_type_errors(r.stdout + "\n" + r.stderr, str(Path(project).parent))
+        output = r.stdout + "\n" + r.stderr
+        ours = overlay_type_errors(output, str(Path(project).parent))
         if ours:
             print("type errors in our overlay code:", file=sys.stderr)
             print("\n".join(ours[:200]), file=sys.stderr)
+            return EXIT_BROKEN
+        if unexplained_tsc_failure(r.returncode, output):
+            print("tsc exited non-zero but printed no `error TS` line; failing rather than guessing",
+                  file=sys.stderr)
+            print(output[-3000:], file=sys.stderr)
             return EXIT_BROKEN
         if r.returncode != 0:
             print("tsc reports errors only inside upstream packages our code imports; upstream's check covers them")

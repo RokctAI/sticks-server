@@ -61,5 +61,15 @@ class OverlayTypecheck(unittest.TestCase):
         self.assertIn('"extends": "../../tsconfig.base.json"', text)
 
 
+class UnexplainedFailure(unittest.TestCase):
+    def test_nonzero_exit_with_no_error_line_is_unexplained(self):
+        self.assertTrue(b.unexplained_tsc_failure(1, "Segmentation fault"))
+        self.assertTrue(b.unexplained_tsc_failure(2, ""))
+
+    def test_an_error_line_or_a_clean_exit_is_explained(self):
+        self.assertFalse(b.unexplained_tsc_failure(1, "x.ts(1,1): error TS2322: bad"))
+        self.assertFalse(b.unexplained_tsc_failure(0, ""))
+
+
 if __name__ == "__main__":
     unittest.main()
