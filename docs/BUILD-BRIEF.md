@@ -39,7 +39,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. The owner keeps it current as PRs merge.
 
 
-Status as of 2026-11-15: tasks 1-5 and 5b merged (#7, #8, #10, #11, #12, #14; CI #9). Next: task 6.
+Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b, then 7.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -160,13 +160,19 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - **Client abort:** in serve.ts, when the client disconnects mid-stream (req "close"), cancel the response body stream and stop reading; add a test.
 - **Client IP:** in the node:http adapter, pass the real client address on: take `req.socket.remoteAddress`, set it where upstream's per-IP limit reads the IP (check which header or field upstream uses; only trust `X-Forwarded-For` when the request comes from the tenant's own proxy, which the spec puts in front). Add a test that two different addresses get separate limits.
 
-### Task 6: cut what Sticks does not use (spec §11.2, §5.2; needs 5)
+### Task 6: DONE (merged as #17). Cut what Sticks does not use (spec §11.2, §5.2; needs 5)
 - **Also in this PR (two small fixes from 5b review):** (1) `serve.ts` waitForDrain: return at once when `res.destroyed` or `res.writableEnded`, so an aborted request never hangs; add a test. (2) `build_engine.py`: if `tsc` exits non-zero and printed no `error TS` line at all, fail the build.
 - The composition root must not import the modules on the §11.2 list (messaging apps, phone calls and call push, bot email, referrals and plans, desktop sockets, push, wallet and purchases, account import and export, plugin submissions, remote computer providers, analytics). Where upstream imports one statically, use a patch that makes the import lazy, with a one-line reason.
 - **Rule:** nothing that a call in `contracts/used-procedures.txt` needs may be cut. Add a test that loads that file and checks each procedure is still routed.
 - `organizations/create` and `spaces/create` are refused with a clear error.
 - Add `scripts/measure_engine.py --workdir <dir> --summary <file>`. It starts the built engine against a Testcontainers Postgres, reads its idle memory (RSS), and writes a small table to the summary file.
 - CI's Measurements job runs it. Copy the number into the PR as [measured], with the CI link.
+
+### Task 6b: cut messaging and the adapters barrel (spec §11.2, §9; needs 6; one PR, branch kilo/cut-messaging-adapters)
+Decided, do not ask again:
+- **Messaging:** spec §11.2 settles it. Cut every messaging app and the team-chat bridge (not mounted, not imported). Keep only `messaging/status`, which returns "none". Sticks talk to the user through the Sticks app and the onboarding chat only. Edit `apps/api/src/app.ts`, the router and the bridge directly (patch in `patches/`). Keep the routing test green: nothing in `contracts/used-procedures.txt` may 404.
+- **Adapters barrel:** stop importing `@rakazo/adapters` as one barrel. In `app.ts`, import each provider we use from its own module path, and build only those. Providers we use: Postgres, the model and speech gateway (task 13), the in-container computer and sandbox (tasks 15-16), and the storage the engine already needs. Everything else is not imported. If a cut provider is still referenced, guard it so it is never constructed.
+- Re-run the Measurements job and put the new idle RSS [measured] in the PR, beside 635.9 MB [measured] (#17, run 43731318899; that run started the engine under tsx, so it likely overstates). Measure the built output, not tsx. Target 150 MB. If it is still above 300 MB, list the five largest modules loaded at idle (from a heap or require trace in CI) and stop there.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
