@@ -17,9 +17,14 @@ These answers SETTLE the earlier BLOCKED items (owner's decision, 11-15). Write 
 Work list, one draft PR per line, no CI checks between:
 1. Task 9b with the answers above (the doc change goes in this PR).
 2. Task 13b, including the startup refusal of ANY `*_API_KEY` variable.
-3. Push the plugin and idle answers to #42, #41 and #40 (existing branches).
+3. Push to the existing branches (these unblock what each PR body lists):
+   - #42: register "Build a plugin" in upstream's `builtin-skills.ts` through a file in `patches/`; store drafts in `plugin_draft`; wire `approveDraft` to upstream's `requireAdmin`. MCP stays out.
+   - #40: count open client streams and live scripts with a small counter, added to upstream's stream and script handlers through `patches/`. Push on every change, using a run-finished hook added the same way. Close idle streams with the "sleeping" notice. The freeze fallback waits for the cold-start number.
+   - #41: install and enable the GitHub plugin from our boot pass when it is missing (no upstream hook needed). Add call-level tests with a fake connector runtime in vitest: the credential header goes out, and a write waits for approval.
 4. Task 18 (after 13b's PR is up).
-5. Append the results to report #38. Then reply in two lines.
+5. Task 23 (new): the freeze fallback (spec 7.6), once the cold-start number is in the report.
+6. Task 24 (new): run Python tests against the patched engine in CI for every patch file (a patch that no longer applies fails the build).
+7. Append the results to report #38. Then reply in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
