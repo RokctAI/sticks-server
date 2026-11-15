@@ -68,7 +68,8 @@ class OverlayRules(unittest.TestCase):
         # file at the top level (or a root package.json that would change the lockfile) is caught here.
         files = b.overlay_files(ROOT / "overlay")
         self.assertTrue(files, "overlay/ should hold the engine app")
-        stray = [f for f in files if not f.startswith("apps/")]
+        # plugins/ holds built-in plugin descriptions (data, not code): the GitHub plugin (task 22).
+        stray = [f for f in files if not (f.startswith("apps/") or f.startswith("plugins/"))]
         self.assertEqual(stray, [])
 
 

@@ -1,0 +1,161 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GitHub (built-in plugin)",
+    "version": "1.0.0",
+    "description": "Repositories, contents, issues and pull requests on GitHub. Reads are free; every write asks for approval. Credentials are the user's own GitHub token or GitHub App installation, stored as a connector credential and never sent to the model."
+  },
+  "servers": [{ "url": "https://api.github.com" }],
+  "security": [{ "githubToken": [] }],
+  "components": {
+    "securitySchemes": {
+      "githubToken": { "type": "http", "scheme": "bearer", "description": "The user's GitHub token or App installation token, from the connector credential." }
+    }
+  },
+  "paths": {
+    "/user/repos": {
+      "get": {
+        "operationId": "list_repos",
+        "summary": "List the repositories the user can access.",
+        "responses": { "200": { "description": "Repositories." } }
+      }
+    },
+    "/repos/{owner}/{repo}": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "get_repo",
+        "summary": "Get one repository.",
+        "responses": { "200": { "description": "The repository." } }
+      }
+    },
+    "/repos/{owner}/{repo}/contents/{path}": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "path", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "read_file",
+        "summary": "Read a file or list a folder in a repository.",
+        "responses": { "200": { "description": "The file or the listing." } }
+      },
+      "put": {
+        "operationId": "write_file",
+        "summary": "Create or update a file in a repository.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message", "content"],
+                "properties": {
+                  "message": { "type": "string" },
+                  "content": { "type": "string", "description": "Base64 of the new file content." },
+                  "sha": { "type": "string", "description": "The current blob sha, when updating." },
+                  "branch": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated." }, "201": { "description": "Created." } }
+      }
+    },
+    "/repos/{owner}/{repo}/issues": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "list_issues",
+        "summary": "List issues in a repository.",
+        "responses": { "200": { "description": "Issues." } }
+      },
+      "post": {
+        "operationId": "create_issue",
+        "summary": "Open an issue in a repository.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["title"], "properties": { "title": { "type": "string" }, "body": { "type": "string" } } } } }
+        },
+        "responses": { "201": { "description": "Created." } }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{issue_number}": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "issue_number", "in": "path", "required": true, "schema": { "type": "integer" } }
+      ],
+      "get": {
+        "operationId": "get_issue",
+        "summary": "Get one issue.",
+        "responses": { "200": { "description": "The issue." } }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{issue_number}/comments": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "issue_number", "in": "path", "required": true, "schema": { "type": "integer" } }
+      ],
+      "post": {
+        "operationId": "comment_on_issue",
+        "summary": "Comment on an issue or a pull request.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["body"], "properties": { "body": { "type": "string" } } } } }
+        },
+        "responses": { "201": { "description": "Created." } }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "operationId": "list_pull_requests",
+        "summary": "List pull requests in a repository.",
+        "responses": { "200": { "description": "Pull requests." } }
+      },
+      "post": {
+        "operationId": "create_pull_request",
+        "summary": "Open a pull request.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["title", "head", "base"], "properties": { "title": { "type": "string" }, "head": { "type": "string" }, "base": { "type": "string" }, "body": { "type": "string" } } } } }
+        },
+        "responses": { "201": { "description": "Created." } }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{pull_number}": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "pull_number", "in": "path", "required": true, "schema": { "type": "integer" } }
+      ],
+      "get": {
+        "operationId": "get_pull_request",
+        "summary": "Get one pull request.",
+        "responses": { "200": { "description": "The pull request." } }
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{pull_number}/merge": {
+      "parameters": [
+        { "name": "owner", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "repo", "in": "path", "required": true, "schema": { "type": "string" } },
+        { "name": "pull_number", "in": "path", "required": true, "schema": { "type": "integer" } }
+      ],
+      "put": {
+        "operationId": "merge_pull_request",
+        "summary": "Merge a pull request.",
+        "responses": { "200": { "description": "Merged." } }
+      }
+    }
+  }
+}
