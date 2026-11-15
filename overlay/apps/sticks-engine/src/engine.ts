@@ -7,6 +7,7 @@ import { deployMigrations } from "../../../packages/db/src/index.ts";
 import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/src/index.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { startBootScheduler } from "./boot-pass.js";
+import { endOfDayHookFromEnv, notConnectedEndOfDayDeps } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 
@@ -70,10 +71,14 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
 
   // Recover what a restart lost, before anything serves (spec 7.6, brief task 7). The one timer for
   // the nearest due item is held by the scheduler; stop() clears it before upstream shuts down.
+  // The end-of-day job (brief task 18) is held in the scheduler's one timer when STICKS_END_OF_DAY is set.
+  // Its chat listing, summariser, Engram write and context clear are not connected yet: a day that runs
+  // before they are fails with a clear error (logged by onError), and the next day still runs.
   const scheduler = startBootScheduler({
     prisma: handles.prisma,
     jobs: handles.jobs,
-    onError: (error) => logger.error("boot pass failed", error),
+    endOfDay: endOfDayHookFromEnv(env, notConnectedEndOfDayDeps()),
+    onError: (error) => logger.error("boot scheduler error (boot pass or end of day)", error),
   });
   await scheduler.ready;
 
