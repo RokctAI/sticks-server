@@ -124,7 +124,7 @@ describe.skipIf(!POSIX)("commands and files, run in a Stick's folder (POSIX)", (
           text += chunk.toString();
           if (text.includes("\n")) {
             client.end();
-            resolve(text.split("\n")[0]);
+            resolve(text.split("\n")[0] ?? "");
           }
         });
         client.on("error", reject);
@@ -184,7 +184,7 @@ describe("the browser for one run (brief task 15)", () => {
       }),
     ).rejects.toThrow("the run failed");
     expect(seen).toEqual([browserProfileDir(root, "b2")]);
-    expect(seen[0].endsWith(".browser")).toBe(true);
+    expect(seen[0]?.endsWith(".browser")).toBe(true);
     expect(closed).toBe(1);
   });
 });
