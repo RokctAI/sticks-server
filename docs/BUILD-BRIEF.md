@@ -40,14 +40,16 @@ This file is the whole brief. Read it on `main`. The owner keeps it current as P
 
 ## How a session runs (owner, 11-15; this overrides any older "stop" or "report" rule)
 - Work through **every** task whose needs are already merged on `main`, in the order below. One draft PR per task, each branched from the latest `main`. Never stack.
+- **Clone upstream once.** Keep one clone of v0.11.0 in a fixed folder (for example `~/sticks-upstream`), reused by every task and every session. Before cloning, check if it exists; if it does, `git -C <folder> checkout -- . && git -C <folder> clean -fd` to reset it instead of cloning again. Never clone per task. Delete it only when all tasks are DONE.
 - Do not wait for CI. Push, open the PR, and go straight to the next task. Never start a background monitor, watcher or sleep loop.
 - Before you report, read each PR's checks once (`gh pr checks <n>`). Fix any red ones, push, and move on.
 - **Reports go in a report PR, not in chat.** Keep one docs-only draft PR to `main` (branch `rokct/report-<date>-<n>`) that adds `docs/reports/<date>-<n>.md`. After each step PR, append one short section: task, PR link, what it does, CI result, claims to verify, anything BLOCKED or decided. If the previous report PR is merged, open a new one (new file, new branch from `main`); never edit a merged report.
-- Stop when every task left needs a PR that is not merged yet. Your final reply in chat is at most two lines: the report PR link and "done" or "blocked: <one line>". This replaces rule 8's paste block.
+- Stop when every task left needs a PR that is not merged yet. Your final reply in chat is at most two lines: the report PR link and "done" or "blocked: <one line>". This replaces both paste blocks above.
 
 ### Which open tasks can run in the same session
 After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is already merged:
 - **Independent now (each needs only task 5, 3 or 6):** 7, 9, 13, 15, 19, 20.
+- **Once 20 is merged:** 21 and 22.
 - **Once 7 is merged:** 8. **Once 9 is merged:** 10 and 11. **Once 15 is merged:** 16 and 17.
 - **Once 7 and 9 are merged:** 12. **Once 7 and 12 are merged:** 14. **Once 7 and 13 are merged:** 18.
 So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a chain, so open only the first unmerged one.
@@ -250,8 +252,11 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Write the three calls in `docs/pulsar-engine-interface.md`. Test against a fake Pulsar: refusal, extend, a crash before settle, and a double settle.
 
 ### Task 13: model and speech calls through the gateway (spec §4.4, §8.3, §11.1 "Model and speech keys"; needs 5)
-- All model and speech providers point at `STICKS_GATEWAY_URL`, with the key read from `/run/secrets/gateway_key`.
+**Gateway protocol (decided 11-15, not BLOCKED any more):** the gateway is a pass-through proxy that speaks each provider's own API unchanged, under a path prefix per provider: `${STICKS_GATEWAY_URL}/<provider>/...` (for example `/anthropic/v1/messages`, `/openai/v1/chat/completions`, `/openai/v1/audio/speech`). The tenant sends its gateway key where the provider's API key would go (`Authorization: Bearer` or `x-api-key`, whichever that provider's SDK uses). Streaming is the provider's own streaming.
+- So the engine only changes base URLs and keys: for every model and speech provider upstream supports, set its SDK `baseURL` to `${STICKS_GATEWAY_URL}/<provider>` and its key to the content of `/run/secrets/gateway_key`.
 - No provider key is read from the environment. Add a test that fails if one is.
+- Test with a small fake gateway in vitest (an HTTP server that checks the path prefix and the key, and returns a canned reply and a canned stream). Do not build the gateway itself; it is a separate service.
+- Write the contract in `docs/gateway-protocol.md` (prefixes, auth header per provider, streaming, error codes 401 bad key and 402 over ceiling).
 - Do NOT build the "own model keys" refusal: it is an undecided proposal.
 
 ### Task 14: keep-going inside the engine (spec §7.5; needs 7 and 12)
@@ -307,6 +312,7 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - **No outside memory:** the external memory providers are switched off in the Sticks build, so memory never leaves the tenant.
 
 ### Task 19: the onboarding bot's harness side (spec §4.8; docs and samples only)
+- **Scale (decided):** one onboarding bot serves any number of users at once. Each chat is a separate session; the bot keeps no state in memory between turns (all state in the hub DB). The hub runs as many harness workers as needed behind a load balancer. Real limits are the gateway's provider rate limits and Postgres connections (use a pooler). Write this in the sample docs.
 - **The logic lives in Pulsar's control SDK** (not here). The harness only gets tools and an instruction.
 - **Add `templates/onboarding-bot.md`**, the bot's instruction, from spec §4.8:
   - ask the core questions first, one at a time;
@@ -327,7 +333,21 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
   - read actions run freely, and write actions ask for approval (`packages/core/src/action-approval.ts`);
   - credentials are never sent to the model;
   - the call leaves from the engine, never from the sandbox.
-- Do NOT build who writes new plugins (a builder Stick or a hub service). The spec leaves that open.
+- Who writes new plugins is now decided: task 21 (a Stick skill).
+
+### Task 21: plugin builder skill (owner's ruling 11-15, settles spec §4.7's open point; needs 20)
+- Sticks can write a plugin for us when none exists. Add a built-in skill "Build a plugin" to the engine.
+- Input: the service name and its API docs (OpenAPI or GraphQL URL, or its API reference). Output: a connector description (OpenAPI/GraphQL file, read actions free, write actions need approval) saved as a draft plugin in the tenant.
+- The draft is never live until a tenant admin approves it (task 20's approval path). Credentials are entered by the admin, never seen by the model.
+- If an MCP plugin is needed (logic a description cannot carry), the skill writes the request in the report as BLOCKED: we host MCP servers, Sticks do not.
+- Tests: a sample OpenAPI file turns into a draft plugin; a draft cannot be called before approval.
+
+### Task 22: built-in GitHub plugin (owner's ruling 11-15; needs 20)
+- First check upstream v0.11.0 for an existing GitHub integration or plugin. If one exists, keep it and make sure the trim did not remove it.
+- Otherwise ship `plugins/github/` as a connector description covering: repos (list, get), contents (read, create/update file), issues (list, get, create, comment), pull requests (list, get, create, comment, merge). Reads free, writes need approval.
+- Auth: the user's own GitHub token or GitHub App installation, stored as a connector credential, never sent to the model.
+- Installed and enabled by default in every tenant (still needs the user's token to work).
+- Tests: the plugin loads; a read call goes out with the credential header; a write call asks for approval.
 
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
