@@ -7,7 +7,9 @@ import { DesktopSandboxProvider } from "../../../packages/adapters/src/desktop-s
 import type {
   AdapterContext,
   CommandRequest,
+  ComputerFileEntry,
   ComputerRef,
+  PortableFile,
   ProcessEvent,
 } from "../../../packages/adapter-kit/src/index.ts";
 import type { CommandResult, SandboxRequest } from "../sandbox/helper.js";
@@ -112,5 +114,57 @@ export class HelperComputerProvider extends DesktopSandboxProvider {
     if (result.stderr) yield { type: "stderr", data: result.stderr };
     if (result.timedOut) yield { type: "stderr", data: "command timed out\n" };
     yield { type: "exit", code: result.code ?? 1 };
+  }
+
+  // File operations go through the helper too, so they run in the Stick's folder under the helper's checks.
+  // Bytes travel as base64, so binary files come back and go in unchanged.
+
+  override async listFiles(
+    computer: ComputerRef,
+    directory: string,
+    _context: AdapterContext,
+  ): Promise<ComputerFileEntry[]> {
+    const relative = directory.replace(/^\/+|\/+$/g, "");
+    const result = (await sendToHelper(this.socketPath, {
+      op: "list",
+      stickId: computer.botId,
+      path: relative || undefined,
+    })) as { entries: { name: string; dir: boolean; size: number }[] };
+    return result.entries.map((entry) => ({
+      path: relative ? `${relative}/${entry.name}` : entry.name,
+      kind: entry.dir ? "dir" : "file",
+      size: entry.size,
+    }));
+  }
+
+  override async readFile(
+    computer: ComputerRef,
+    filePath: string,
+    _context?: AdapterContext,
+    options?: { maxBytes?: number },
+  ) {
+    const result = (await sendToHelper(this.socketPath, {
+      op: "readBytes",
+      stickId: computer.botId,
+      path: filePath,
+    })) as { base64: string };
+    const bytes = new Uint8Array(Buffer.from(result.base64, "base64"));
+    if (options?.maxBytes !== undefined && bytes.byteLength > options.maxBytes) {
+      throw new Error(`computer file exceeds ${options.maxBytes} bytes`);
+    }
+    return bytes;
+  }
+
+  override async writeFile(computer: ComputerRef, file: PortableFile): Promise<void> {
+    // The helper cannot set an executable bit; refuse rather than write a file that is not executable.
+    if (file.executable) {
+      throw new Error("executable files cannot be written through the sandbox helper yet");
+    }
+    await sendToHelper(this.socketPath, {
+      op: "writeBytes",
+      stickId: computer.botId,
+      path: file.path,
+      base64: Buffer.from(file.content).toString("base64"),
+    });
   }
 }
