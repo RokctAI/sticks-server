@@ -8,6 +8,7 @@ Steps (spec 11.4):
      overwrite a file that already exists in upstream;
   4. pnpm install --frozen-lockfile, then upstream's typecheck (`pnpm run check`). pnpm comes from
      corepack, which reads the version upstream pins in its packageManager field;
+  4b. `tsc --noEmit` on each overlay tsconfig.json under apps/ (task 5b): a type error fails the build;
   5. vitest run on our overlay test files only (a temporary config outside this repo).
 
 CI runs this in the Engine job (.github/workflows/ci.yml), after `corepack enable` on Node 24.
@@ -68,6 +69,29 @@ def collisions(files: list[str], upstream_root: Path) -> list[str]:
 def chosen_tag(pin_tag: str, override: str | None) -> str:
     """The tag to build: the --tag override when given, otherwise the one in upstream.pin."""
     return override or pin_tag
+
+
+def overlay_typecheck_projects(files: list[str]) -> list[str]:
+    """Overlay tsconfig.json files under apps/. Each is typechecked with `tsc --noEmit` (task 5b)."""
+    return [f for f in files if f.startswith("apps/") and f.endswith("/tsconfig.json")]
+
+
+def overlay_type_errors(output: str, project_dir: str) -> list[str]:
+    """The tsc lines that are ours to fix: errors in files under project_dir, and config-level errors.
+
+    Our overlay imports upstream packages by relative path, and tsc then reports errors inside those
+    packages (their own jsx and path settings are not ours). Upstream's `pnpm run check` already covers
+    them, so those lines are left out here. Lines are `path(line,col): error TSnnnn: ...` with pretty off.
+    """
+    prefix = project_dir.replace("\\", "/").rstrip("/") + "/"
+    out: list[str] = []
+    for line in output.splitlines():
+        if "error TS" not in line:
+            continue
+        m = re.match(r"^(.+?)\(\d+,\d+\): error TS", line)
+        if m is None or m.group(1).replace("\\", "/").startswith(prefix):
+            out.append(line)
+    return out
 
 
 def overlay_test_files(files: list[str]) -> list[str]:
@@ -193,6 +217,17 @@ def main() -> int:
     if r.returncode != 0:
         print(r.stderr[-3000:], file=sys.stderr)
         return EXIT_BROKEN
+
+    for project in overlay_typecheck_projects(overlay_list):
+        step(f"overlay typecheck: tsc --noEmit -p {project}")
+        r = up.run([pnpm, "exec", "tsc", "--noEmit", "--pretty", "false", "-p", project], cwd=checkout, check=False)
+        ours = overlay_type_errors(r.stdout + "\n" + r.stderr, str(Path(project).parent))
+        if ours:
+            print("type errors in our overlay code:", file=sys.stderr)
+            print("\n".join(ours[:200]), file=sys.stderr)
+            return EXIT_BROKEN
+        if r.returncode != 0:
+            print("tsc reports errors only inside upstream packages our code imports; upstream's check covers them")
 
     tests = overlay_test_files(overlay_list)
     if not tests:

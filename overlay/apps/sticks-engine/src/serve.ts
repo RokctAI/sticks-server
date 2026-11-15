@@ -3,9 +3,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 
-export type FetchApp = { fetch: (request: Request) => Response | Promise<Response> };
+/**
+ * What the Node side hands to app.fetch as its environment. Hono's getConnInfo (used by upstream's
+ * client-IP resolver) reads the socket from `incoming`, exactly as @hono/node-server does.
+ */
+export type NodeEnv = { incoming: IncomingMessage; outgoing: ServerResponse };
+export type FetchApp = { fetch: (request: Request, env: NodeEnv) => Response | Promise<Response> };
 
-function toRequest(req: IncomingMessage): Request {
+export function toRequest(req: IncomingMessage): Request {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
@@ -21,7 +26,25 @@ function toRequest(req: IncomingMessage): Request {
   return new Request(url, init);
 }
 
-async function writeResponse(response: Response, res: ServerResponse): Promise<void> {
+/** Resolves on drain, or when the client has gone (so a dead socket never blocks the loop). */
+function waitForDrain(res: ServerResponse): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      res.off("drain", done);
+      res.off("close", done);
+      resolve();
+    };
+    res.once("drain", done);
+    res.once("close", done);
+  });
+}
+
+/**
+ * Copies the body to the socket, one chunk at a time, honouring backpressure. If the client
+ * disconnects mid-stream, the body is cancelled and reading stops, so the app's stream (a model
+ * reply, a long poll) does not keep producing into nothing.
+ */
+export async function writeResponse(response: Response, res: ServerResponse): Promise<void> {
   res.statusCode = response.status;
   response.headers.forEach((value, name) => {
     if (name !== "set-cookie") res.setHeader(name, value);
@@ -32,14 +55,36 @@ async function writeResponse(response: Response, res: ServerResponse): Promise<v
     res.end();
     return;
   }
-  Readable.fromWeb(response.body as never).pipe(res);
+
+  const reader = response.body.getReader();
+  let gone = false;
+  const onClose = () => {
+    if (res.writableFinished) return;
+    gone = true;
+    void reader.cancel().catch(() => undefined);
+  };
+  res.once("close", onClose);
+  try {
+    while (!gone) {
+      const { done, value } = await reader.read();
+      if (done || gone) break;
+      if (!res.write(value)) await waitForDrain(res);
+    }
+    if (!gone) res.end();
+  } catch {
+    // The app's stream failed mid-body: the status is already sent, so end the response.
+    if (!gone) res.end();
+  } finally {
+    res.off("close", onClose);
+  }
 }
 
 /** Listens on host:port and hands each request to app.fetch. Returns the Node server. */
 export function serveFetch(app: FetchApp, port: number, host: string): Server {
   const server = createServer(async (req, res) => {
     try {
-      await writeResponse(await app.fetch(toRequest(req)), res);
+      const response = await app.fetch(toRequest(req), { incoming: req, outgoing: res });
+      await writeResponse(response, res);
     } catch {
       if (!res.headersSent) res.statusCode = 500;
       res.end();
