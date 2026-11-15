@@ -42,7 +42,8 @@ This file is the whole brief. Read it on `main`. The owner keeps it current as P
 - Work through **every** task whose needs are already merged on `main`, in the order below. One draft PR per task, each branched from the latest `main`. Never stack.
 - Do not wait for CI. Push, open the PR, and go straight to the next task. Never start a background monitor, watcher or sleep loop.
 - Before you report, read each PR's checks once (`gh pr checks <n>`). Fix any red ones, push, and move on.
-- **Report only** when every task left needs a PR that is not merged yet, or after about five PRs, whichever comes first. Then send ONE report for all of them: per PR the number, link, one line on what it does, CI result, and the claims to verify.
+- **Reports go in a report PR, not in chat.** Keep one docs-only draft PR to `main` (branch `rokct/report-<date>-<n>`) that adds `docs/reports/<date>-<n>.md`. After each step PR, append one short section: task, PR link, what it does, CI result, claims to verify, anything BLOCKED or decided. If the previous report PR is merged, open a new one (new file, new branch from `main`); never edit a merged report.
+- Stop when every task left needs a PR that is not merged yet. Your final reply in chat is at most two lines: the report PR link and "done" or "blocked: <one line>". This replaces rule 8's paste block.
 
 ### Which open tasks can run in the same session
 After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is already merged:
