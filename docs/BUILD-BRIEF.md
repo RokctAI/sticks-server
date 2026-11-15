@@ -4,6 +4,16 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
+## DO THIS NOW (read first; overrides everything below)
+Your work list for this session, in order. Open one draft PR for EACH line before you write any report or reply:
+1. Task 7 (memory job driver)
+2. Task 9 (sign-in by Pulsar token)
+3. Task 13 (gateway: protocol is decided, see task 13; build it)
+4. Task 15 (sandbox helper)
+5. Task 20 (apps without a plugin)
+After each PR is pushed, go straight to the next line. Do not check CI between them. "Not started" is never a valid status: each line ends as a PR or as `BLOCKED: <reason>` written in the report.
+Only when all five lines are done: write ONE report PR covering all of them, then reply in two lines.
+
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
    - Reading upstream code is fine: open it on GitHub, or `git clone` it and only read the files. Installing or building it is not.
@@ -57,7 +67,7 @@ So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a
 
 
 Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. 6b-2 merged as #23 (idle RSS [measured] 397.3 MB built, 620.2 MB tsx, run 43736449751); 19 merged as #24. Next: 6b-3 (measurement only), and 7, 9, 13, 15, 20 alongside it.
-**First, before new work:** update the open report PR #25 so it matches: 6b-2 CI green with those numbers; task 19 CI green; task 13 decided (see task 13), not built yet; drop open question 1 (answered).
+Report #25 merged; 6b-3 is #28.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
