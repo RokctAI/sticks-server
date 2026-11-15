@@ -112,6 +112,28 @@ describe("sticks engine root (one process, shared Postgres, scripted model)", ()
     expect(statuses).toEqual(["completed"]);
   }, 300_000);
 
+  it("messaging/status answers none: no messaging app is connected or offered (spec 11.2)", async () => {
+    const signup = await handles.app.request("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({
+        email: `messaging-${Date.now()}@sticks.test`,
+        password: "test-password-123",
+        name: "Messaging tester",
+      }),
+    });
+    const cookie = sessionCookieHeader(signup);
+    const response = await handles.app.request("/rpc/messaging/status", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, origin: ORIGIN },
+      body: JSON.stringify({ json: {} }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { json: { enabled: boolean; providers: string[] } };
+    expect(body.json.enabled).toBe(false);
+    expect(body.json.providers).toEqual([]);
+  }, 120_000);
+
   it("refuses organizations/create and spaces/create with a clear error (spec 5.2)", async () => {
     const signup = await handles.app.request("/api/auth/sign-up/email", {
       method: "POST",
