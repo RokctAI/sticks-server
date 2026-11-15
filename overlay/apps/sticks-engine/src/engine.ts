@@ -6,6 +6,7 @@ import { createApp, type AppHandles } from "../../api/src/app.js";
 import { deployMigrations } from "../../../packages/db/src/index.ts";
 import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/src/index.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
+import { startBootScheduler } from "./boot-pass.js";
 import { providerKeysInEnv } from "./gateway.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
@@ -53,7 +54,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
 
   await deployMigrations({ migrationUrl: databaseUrl, dbPackageDir: DB_PACKAGE_DIR });
 
-  return createApp({
+  const logger = createServiceLogger({ service: SERVICE_NAMES.api });
+  const handles = await createApp({
     databaseUrl,
     encryptionKey: contentKey,
     // Events go to this process only: no Postgres LISTEN connection (spec 4.3, 11.1).
@@ -61,7 +63,24 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     // The memory job driver is the supported single-process mode (spec 11.1).
     wakeupDriver: "memory",
     ticketBoardEnabled: true,
-    logger: createServiceLogger({ service: SERVICE_NAMES.api }),
+    logger,
     ...options.overrides,
   });
+
+  // Recover what a restart lost, before anything serves (spec 7.6, brief task 7). The one timer for
+  // the nearest due item is held by the scheduler; stop() clears it before upstream shuts down.
+  const scheduler = startBootScheduler({
+    prisma: handles.prisma,
+    jobs: handles.jobs,
+    onError: (error) => logger.error("boot pass failed", error),
+  });
+  await scheduler.ready;
+  const stopUpstream = handles.stop;
+  return {
+    ...handles,
+    stop: async () => {
+      scheduler.stop();
+      await stopUpstream();
+    },
+  };
 }
