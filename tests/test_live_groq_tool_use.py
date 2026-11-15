@@ -15,7 +15,8 @@ import urllib.error
 import urllib.request
 
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Both models the shared release workflow uses. Each one is checked on its own, so the run shows which passed.
+MODELS = ["groq/compound", "llama-3.3-70b-versatile"]
 KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 TOOL = {
@@ -50,25 +51,28 @@ def chat(payload: dict) -> dict:
 
 @unittest.skipUnless(KEY, "GROQ_API_KEY is not set: the live tool-use check is skipped")
 class GroqToolUse(unittest.TestCase):
-    def test_model_calls_the_tool_with_schema_valid_arguments(self):
-        reply = chat(
-            {
-                "model": MODEL,
-                "messages": [{"role": "user", "content": "What is the weather in Paris? Use the tool."}],
-                "tools": [TOOL],
-                "tool_choice": "required",
-                "temperature": 0,
-            }
-        )
-        message = reply["choices"][0]["message"]
-        calls = message.get("tool_calls") or []
-        self.assertGreaterEqual(len(calls), 1, "the model made no tool call")
-        call = calls[0]
-        self.assertEqual(call["function"]["name"], "get_weather")
-        arguments = json.loads(call["function"]["arguments"])
-        self.assertEqual(set(arguments), {"city"}, "arguments must match the schema exactly")
-        self.assertIsInstance(arguments["city"], str)
-        self.assertTrue(arguments["city"].strip(), "city must not be empty")
+    def test_each_model_calls_the_tool_with_schema_valid_arguments(self):
+        for model in MODELS:
+            with self.subTest(model=model):
+                reply = chat(
+                    {
+                        "model": model,
+                        "messages": [{"role": "user", "content": "What is the weather in Paris? Use the tool."}],
+                        "tools": [TOOL],
+                        "tool_choice": "required",
+                        "temperature": 0,
+                    }
+                )
+                message = reply["choices"][0]["message"]
+                calls = message.get("tool_calls") or []
+                self.assertGreaterEqual(len(calls), 1, f"{model}: the model made no tool call")
+                call = calls[0]
+                self.assertEqual(call["function"]["name"], "get_weather", f"{model}: wrong tool name")
+                arguments = json.loads(call["function"]["arguments"])
+                self.assertEqual(set(arguments), {"city"}, f"{model}: arguments must match the schema exactly")
+                self.assertIsInstance(arguments["city"], str)
+                self.assertTrue(arguments["city"].strip(), f"{model}: city must not be empty")
+                print(f"RESULT {model}: PASS (tool call {call['function']['name']} {arguments})")
 
 
 if __name__ == "__main__":
