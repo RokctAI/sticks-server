@@ -22,5 +22,8 @@ $changes
 ## Database roles: CHECK BY HAND
 $db_roles
 
+## Our overlay on the new tag (engine build)
+$engine_build
+
 ## What to do
 $next_steps

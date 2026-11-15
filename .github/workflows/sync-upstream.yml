@@ -15,7 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check upstream
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Enable corepack (the pnpm version upstream pins; needed to build the overlay on a new tag)
+        run: corepack enable
+      - name: Check upstream (and build our overlay on a newer tag)
         id: sync
         run: |
           set +e
@@ -38,14 +43,14 @@ jobs:
           git commit -m "Move upstream pin to $tag"
           git push origin "$branch"
           gh pr create --draft --base main --head "$branch" --title "Move upstream pin to $tag" --body-file report.md
-      - name: Issue when something conflicts or the app would break
-        if: steps.sync.outputs.code == '20' || steps.sync.outputs.code == '30'
+      - name: Issue when something conflicts, the app would break, or our overlay does not build
+        if: steps.sync.outputs.code == '20' || steps.sync.outputs.code == '30' || steps.sync.outputs.code == '40'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create --title "Upstream sync needs attention ($(date +%F))" --body-file report.md
       - name: Fail when the check itself could not run
-        if: steps.sync.outputs.code == '2' || (steps.sync.outputs.code != '0' && steps.sync.outputs.code != '10' && steps.sync.outputs.code != '20' && steps.sync.outputs.code != '30')
+        if: steps.sync.outputs.code == '2' || (steps.sync.outputs.code != '0' && steps.sync.outputs.code != '10' && steps.sync.outputs.code != '20' && steps.sync.outputs.code != '30' && steps.sync.outputs.code != '40')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
