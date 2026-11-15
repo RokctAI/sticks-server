@@ -1,0 +1,54 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Sticks onboarding (control SDK)",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://<control-gateway-host>/onboarding" }
+  ],
+  "security": [{ "tenantOnboardingToken": [] }],
+  "components": {
+    "securitySchemes": {
+      "tenantOnboardingToken": { "type": "http", "scheme": "bearer" }
+    }
+  },
+  "paths": {
+    "/state": {
+      "get": {
+        "operationId": "onboardingState",
+        "summary": "Read the onboarding state: answered questions, the next unanswered question, what the answers unlock, and whether the site is still building. Read only.",
+        "responses": { "200": { "description": "The onboarding state for the tenant of this chat token." } }
+      }
+    },
+    "/answer": {
+      "post": {
+        "operationId": "saveOnboardingAnswer",
+        "summary": "Save one answer under its question key, in the tenant's own words. Saving again replaces the earlier answer. Unknown keys are rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["questionKey", "answer"],
+                "properties": {
+                  "questionKey": { "type": "string" },
+                  "answer": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Saved." }, "400": { "description": "Unknown question key." } }
+      }
+    },
+    "/finish": {
+      "post": {
+        "operationId": "finishOnboarding",
+        "summary": "Record that the tenant has said they are done. Only this marks the conversation finished. Call it only when the tenant says so.",
+        "responses": { "200": { "description": "Recorded. Handover follows." } }
+      }
+    }
+  }
+}

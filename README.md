@@ -22,7 +22,8 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | `scripts/setup_tenant.py` | Tenant setup on the server: names the tenant's one space after the company and applies the default instructions. |
 | `templates/report.md` | Report layout (status, patches, contract check, changelog, what to do). |
 | `scripts/reporting_lines.py`, `docs/reporting-lines-and-templates.md` | Reporting lines, pings by role and Stick templates: design and tested reference rules. |
-| `deploy/` | Sample settings and compose override (no secrets; settings are agreed one by one first). |
+| `deploy/` | Sample settings and compose override (no secrets; settings are agreed one by one first). `onboarding-connector.sample.json` is the onboarding bot's three tools (state, save answer, finish) as an OpenAPI connector with placeholder URLs; the control SDK serves them, and the bot reaches them as a connector (spec 4.8). |
+| `templates/onboarding-bot.md` | The onboarding bot's instruction (spec 4.8): one question at a time, save each answer, never guess, finish only when the tenant says so. The logic lives in the control SDK, not here. |
 | `.github/workflows/sync-upstream.yml` | Weekly run that opens a draft PR to move the pin, or an issue when something conflicts. |
 
 ## How a sync works
