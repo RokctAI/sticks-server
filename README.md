@@ -9,7 +9,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | `upstream.pin` | The one upstream release tag we run (plus commit and image digests). Moves only by reviewed PR. |
 | `patches/` | Our ordered patch set (`series`). Empty today: stock upstream until a real change is needed. |
 | `contracts/used-procedures.txt` | The server calls our Dart app makes (generated from the Dart source by `scripts/extract_used_procedures.py`). Checked against every new upstream tag. |
-| `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, writes a report. Never pushes. |
+| `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, builds our overlay on it (`build_engine.py --tag`), writes a report. Never pushes. |
 | `overlay/` | Our engine code as new files only, copied onto the pinned upstream checkout at the same paths by the build. See `overlay/README.md`. |
 | `scripts/build_engine.py` | Clones the pinned tag into `--workdir`, applies `patches/series`, copies `overlay/` on top (refuses on any collision), then runs upstream's install, typecheck and our overlay tests. Run by CI's Engine job. |
 | `scripts/render_env.py` | Prints the image lines (tag + digest) the hub adds to a tenant's `.env`. |
@@ -29,8 +29,12 @@ No upstream source lives here. Upstream is read straight from https://github.com
 2. It clones that tag into a temp folder, applies `patches/series` on top, and checks every procedure
    in `contracts/used-procedures.txt` still exists in upstream's `packages/contracts/src/rpc.ts`.
 3. It writes a report with the upstream changelog entries since our pin (Changed / Removed / Fixed) and a comparison of the pinned version with the new one by area (mobile, web, desktop, server, contract, infra, website...). If the mobile, web or desktop app changed, the report says CHECK BY HAND with the changed files and commit subjects, so someone can decide whether any of it is worth bringing to the Sticks app.
-4. Exit code: `0` up to date, `10` newer tag ready (pin move proposed), `20` a patch conflicts,
-   `30` the app would break. The pin never moves on `20` or `30`.
+4. Our overlay is built on the newer tag (`scripts/build_engine.py --tag <new>`, a fresh folder, same
+   checks as CI's Engine job). The report shows the build output.
+5. Exit code: `0` up to date, `10` newer tag ready (pin move proposed), `20` a patch conflicts,
+   `30` the app would break, `40` our overlay does not build on the newer tag. The pin never moves on
+   `20`, `30` or `40`. When both `30` and a build failure happen, the code is `30`. A patch conflict
+   (`20`) skips the build.
 5. Never force-pushes, never writes to upstream, never changes `main` except through a merged PR.
    A new pin is tested on a test instance before the production server. Hub deploys read `upstream.pin`;
    only the control hub controls Docker.

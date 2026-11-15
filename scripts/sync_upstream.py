@@ -12,7 +12,12 @@ Exit codes:
   10  a newer tag exists and everything applies: propose moving the pin
   20  at least one patch does not apply (conflict report written)
   30  the contract check failed (the app calls a procedure that no longer exists)
+  40  a newer tag exists but our overlay does not build on it (scripts/build_engine.py fails):
+      the pin does NOT move
   2   usage or environment error
+
+On exit 10, 30 or 40 the sync also runs scripts/build_engine.py against the new tag. A build failure
+gives 40, except that 30 keeps its priority when both happen. A patch conflict (20) skips the build.
 
 Usage:
   python scripts/sync_upstream.py [--report report.md] [--write-pin] [--tag vX.Y.Z]
@@ -379,6 +384,32 @@ def image_digest(image: str, tag: str) -> str:
         return ""
 
 
+EXIT_ENGINE_BROKEN = 40
+
+
+def engine_outcome(build_rc: int) -> int | None:
+    """Sync exit code for a scripts/build_engine.py result; None means our overlay builds on the new tag.
+
+    Exit 3 from the build is a patch that does not apply (the sync reports that as 20). Any other
+    failure means our overlay no longer builds (40), including the build refusing to run, because the
+    workflow sets up node and corepack itself; the report shows the build output either way.
+    """
+    if build_rc == 0:
+        return None
+    if build_rc == 3:
+        return 20
+    return EXIT_ENGINE_BROKEN
+
+
+def build_overlay(tag: str, workdir: Path) -> tuple[int, str]:
+    """Run scripts/build_engine.py against `tag` in a fresh folder. Returns (exit code, report text)."""
+    script = ROOT / "scripts" / "build_engine.py"
+    r = run([sys.executable, str(script), "--workdir", str(workdir), "--tag", tag], check=False)
+    lines = (r.stdout + r.stderr).strip().splitlines()
+    tail = "\n".join(lines[-60:]) or "(no output)"
+    return r.returncode, f"The build of `{tag}` exited {r.returncode} (0 = builds, typechecks and overlay tests pass).\n\n```\n{tail}\n```"
+
+
 def write_pin(path: Path, pin: dict[str, str], tag: str, commit: str) -> None:
     pin = dict(pin)
     pin["TAG"], pin["COMMIT"] = tag, commit
@@ -458,6 +489,13 @@ def main() -> int:
 
         changes = compare_versions(checkout, pinned, new_tag)
 
+        engine_txt = "Not built: a patch does not apply, so there is no overlay build to check."
+        if code != 20:
+            build_rc, engine_txt = build_overlay(new_tag, work / "engine")
+            outcome = engine_outcome(build_rc)
+            if outcome is not None and code == 10:  # a contract break (30) already says more, so it keeps priority
+                code = outcome
+
         try:
             db_roles = format_role_report(role_report(added_migrations(checkout, pinned, new_tag)))
         except Exception as exc:  # reported, never changes the exit code
@@ -480,11 +518,17 @@ def main() -> int:
         elif code == 20:
             status, result = "CONFLICT", f"`{new_tag}` is newer but at least one patch does not apply. The pin does NOT move."
             steps = "Rebase the failing patch on the new tag by hand (or drop it if upstream took the change), update patches/, re-run."
+        elif code == EXIT_ENGINE_BROKEN:
+            status, result = "ENGINE BROKEN", (f"`{new_tag}` is newer and our patches and contract check pass, but our overlay "
+                                               "does not build on it. The pin does NOT move.")
+            steps = ("Fix the overlay code (or the patch that feeds it) so it builds on the new tag, in a PR, then re-run. "
+                     "The build output is in the section below.")
         else:
             status, result = "CONTRACT BREAK", f"`{new_tag}` is newer but the app calls something that no longer exists. The pin does NOT move."
             steps = "Update the Dart client and used-procedures.txt in the same wave, or skip this tag."
         values.update(status=status, result=result, patches=patches_txt, contract=contract_txt,
-                      changelog=changelog, changes=changes, db_roles=db_roles, next_steps=steps)
+                      changelog=changelog, changes=changes, db_roles=db_roles, engine_build=engine_txt,
+                      next_steps=steps)
         emit(values, args.report)
         return code
     finally:
@@ -493,6 +537,7 @@ def main() -> int:
 
 def emit(values: dict[str, str], report: str | None) -> None:
     values.setdefault("db_roles", "-")
+    values.setdefault("engine_build", "-")
     text = Template((ROOT / "templates" / "report.md").read_text()).safe_substitute(values)
     if report:
         Path(report).write_text(text)

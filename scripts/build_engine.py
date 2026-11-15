@@ -19,7 +19,10 @@ Exit codes:
   3   a patch in patches/series does not apply
 
 Usage:
-  python scripts/build_engine.py --workdir <empty or missing folder>
+  python scripts/build_engine.py --workdir <empty or missing folder> [--tag vX.Y.Z]
+
+--tag builds a different release tag than upstream.pin (the weekly sync uses it to test a newer tag
+before the pin moves). The pin file itself is never changed here.
 """
 from __future__ import annotations
 
@@ -60,6 +63,11 @@ def overlay_files(overlay_root: Path) -> list[str]:
 def collisions(files: list[str], upstream_root: Path) -> list[str]:
     """Overlay files that would overwrite something already in the upstream checkout."""
     return [f for f in files if (upstream_root / f).exists()]
+
+
+def chosen_tag(pin_tag: str, override: str | None) -> str:
+    """The tag to build: the --tag override when given, otherwise the one in upstream.pin."""
+    return override or pin_tag
 
 
 def overlay_test_files(files: list[str]) -> list[str]:
@@ -119,12 +127,13 @@ def step(msg: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True, help="folder to build in (missing or empty)")
+    ap.add_argument("--tag", help="build this release tag instead of upstream.pin's TAG")
     args = ap.parse_args()
 
     pin = up.read_pin(ROOT / "upstream.pin")
-    tag = pin.get("TAG", "")
+    tag = chosen_tag(pin.get("TAG", ""), args.tag)
     if not up.tag_key(tag):
-        print("upstream.pin has no valid TAG", file=sys.stderr)
+        print(f"no valid release tag (got {tag!r}; upstream.pin TAG or --tag)", file=sys.stderr)
         return EXIT_REFUSED
 
     work = Path(args.workdir).resolve()
