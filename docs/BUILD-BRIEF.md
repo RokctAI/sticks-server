@@ -42,7 +42,8 @@ This file is the whole brief. Read it on `main`. The owner keeps it current as P
 - Work through **every** task whose needs are already merged on `main`, in the order below. One draft PR per task, each branched from the latest `main`. Never stack.
 - Do not wait for CI. Push, open the PR, and go straight to the next task. Never start a background monitor, watcher or sleep loop.
 - Before you report, read each PR's checks once (`gh pr checks <n>`). Fix any red ones, push, and move on.
-- **Report only** when every task left needs a PR that is not merged yet, or after about five PRs, whichever comes first. Then send ONE report for all of them: per PR the number, link, one line on what it does, CI result, and the claims to verify.
+- **Reports go in a report PR, not in chat.** Keep one docs-only draft PR to `main` (branch `rokct/report-<date>-<n>`) that adds `docs/reports/<date>-<n>.md`. After each step PR, append one short section: task, PR link, what it does, CI result, claims to verify, anything BLOCKED or decided. If the previous report PR is merged, open a new one (new file, new branch from `main`); never edit a merged report.
+- Stop when every task left needs a PR that is not merged yet. Your final reply in chat is at most two lines: the report PR link and "done" or "blocked: <one line>". This replaces rule 8's paste block.
 
 ### Which open tasks can run in the same session
 After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is already merged:
@@ -52,7 +53,7 @@ After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is alread
 So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a chain, so open only the first unmerged one.
 
 
-Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b-1, then 6b-2, 6b-3, then 7.
+Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b-2, then 6b-3; 7, 9, 13, 15, 19, 20 can run alongside.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -184,7 +185,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 ### Task 6b: split into three PRs, in this order (decided; do not ask again)
 Do each as its own draft PR. After each one, record the idle RSS [measured] from CI in the PR. If after any step RSS is at or under 150 MB, mark the remaining 6b steps "skipped, target met" and move to task 7.
 
-#### Task 6b-1: measure the built engine (needs 6; branch rokct/measure-built)
+#### Task 6b-1: DONE (merged as #20; idle RSS [measured] 625.4 MB tsx, 441.4 MB built, run 43734567780). Measure the built engine (needs 6; branch rokct/measure-built)
 - In `scripts/measure_engine.py`, bundle the engine entry with esbuild (already in upstream's dev dependencies; if not, use the version upstream's lockfile has) into one file, with workspace packages bundled and node_modules external. Run it with plain `node`, not tsx.
 - Report both numbers in the summary: tsx RSS and built RSS, [measured].
 - Change only the measure script and its test.
