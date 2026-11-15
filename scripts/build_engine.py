@@ -8,6 +8,7 @@ Steps (spec 11.4):
      overwrite a file that already exists in upstream;
   4. pnpm install --frozen-lockfile, then upstream's typecheck (`pnpm run check`). pnpm comes from
      corepack, which reads the version upstream pins in its packageManager field;
+  4b. `tsc --noEmit` on each overlay tsconfig.json under apps/ (task 5b): a type error fails the build;
   5. vitest run on our overlay test files only (a temporary config outside this repo).
 
 CI runs this in the Engine job (.github/workflows/ci.yml), after `corepack enable` on Node 24.
@@ -68,6 +69,11 @@ def collisions(files: list[str], upstream_root: Path) -> list[str]:
 def chosen_tag(pin_tag: str, override: str | None) -> str:
     """The tag to build: the --tag override when given, otherwise the one in upstream.pin."""
     return override or pin_tag
+
+
+def overlay_typecheck_projects(files: list[str]) -> list[str]:
+    """Overlay tsconfig.json files under apps/. Each is typechecked with `tsc --noEmit` (task 5b)."""
+    return [f for f in files if f.startswith("apps/") and f.endswith("/tsconfig.json")]
 
 
 def overlay_test_files(files: list[str]) -> list[str]:
@@ -193,6 +199,13 @@ def main() -> int:
     if r.returncode != 0:
         print(r.stderr[-3000:], file=sys.stderr)
         return EXIT_BROKEN
+
+    for project in overlay_typecheck_projects(overlay_list):
+        step(f"overlay typecheck: tsc --noEmit -p {project}")
+        r = up.run([pnpm, "exec", "tsc", "--noEmit", "-p", project], cwd=checkout, check=False)
+        if r.returncode != 0:
+            print(r.stdout[-3000:], r.stderr[-3000:], sep="\n", file=sys.stderr)
+            return EXIT_BROKEN
 
     tests = overlay_test_files(overlay_list)
     if not tests:

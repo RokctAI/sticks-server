@@ -1,0 +1,48 @@
+diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
+index 74ab91a..676e0e9 100644
+--- a/apps/api/src/app.ts
++++ b/apps/api/src/app.ts
+@@ -264,6 +264,8 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+   const logger = loggerOverride ?? createServiceLogger({ service: SERVICE_NAMES.api });
+   installLogger(logger);
+   const poolMax = parsePositiveInteger(process.env.DB_POOL_MAX, 4);
++  // Idle clients close after this many ms; 0 (unset) keeps them, as upstream always did.
++  const poolIdleMs = Math.max(0, Number(process.env.DB_POOL_IDLE_MS) || 0);
+   configureProviderTransactionPool(poolMax);
+   const created = prismaOverride
+     ? { prisma: prismaOverride, pool: undefined }
+@@ -272,6 +274,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+         applicationName: "rakazo-api",
+         keyProvider: contentKeyProviderFromEnv(),
+         encryptContent: env.contentEncryption,
++        idleTimeoutMillis: poolIdleMs,
+       });
+   let { prisma } = created;
+   // Built before anything listens, so a bad TRUSTED_PROXIES entry stops startup.
+diff --git a/packages/db/src/client.ts b/packages/db/src/client.ts
+index 00a15f3..473589e 100644
+--- a/packages/db/src/client.ts
++++ b/packages/db/src/client.ts
+@@ -25,6 +25,8 @@ export interface DbClientOptions {
+   keyProvider?: KeyProvider;
+   /** Encrypt new content. Defaults to CONTENT_ENCRYPTION (see resolveContentEncryption). */
+   encryptContent?: boolean;
++  /** Close a client idle for this many ms. 0 (the default) never closes idle clients. */
++  idleTimeoutMillis?: number;
+ }
+ 
+ const DEFAULT_POOL_MAX = 4;
+@@ -40,9 +42,10 @@ export function createPool(connectionString: string, options: DbClientOptions =
+     // Fail a checkout instead of queueing forever when Postgres is already at
+     // max_connections (53300) or the pool is saturated.
+     connectionTimeoutMillis: CHECKOUT_TIMEOUT_MS,
+-    // 0 disables idle eviction. Dropping idle clients and reopening them on the
+-    // next job burst is how a tight Postgres hits 53300; keep what we already have.
+-    idleTimeoutMillis: 0,
++    // 0 disables idle eviction (the default). Dropping idle clients and reopening them on the
++    // next job burst is how a tight Postgres hits 53300; keep what we already have unless the
++    // caller asks otherwise (the Sticks engine asks for 30 s, so a quiet tenant holds fewer).
++    idleTimeoutMillis: options.idleTimeoutMillis ?? 0,
+     application_name: options.applicationName,
+     keepAlive: true,
+   });
