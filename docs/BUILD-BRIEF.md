@@ -1,4 +1,4 @@
-# Haiku brief: build the Sticks server
+# Build brief: the Sticks server
 
 Repo: `RokctAI/sticks-server`. Follow this file exactly.
 
@@ -28,7 +28,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 5. **Numbers.** [measured] numbers come only from CI job summaries, with the link.
 6. **Toolchain.** At v0.11.0, upstream uses pnpm 12.18.0 (via corepack) and Node `^24.15.0 || >=26.0.0`. Never hard-code either.
 7. **When the spec does not settle something,** write `BLOCKED: <question>` in the PR and move to the next task that does not depend on it. Do not build anything listed in the spec's §13 "Proposals, not yet decided".
-8. **You cannot message anyone.** End each reply with a block Ray can paste into the project chat:
+8. **You cannot message anyone.** End each reply with a block the owner can paste into the project chat:
    - the PR number and link;
    - the CI run link and its result;
    - one line saying what the PR does;
@@ -36,14 +36,15 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 
 
 ## How to use this file
-This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. Ray keeps it current as PRs merge.
+This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. the owner keeps it current as PRs merge.
 
 
 Status as of 2026-11-15: tasks 1-5 merged (#7, #8, #10, #11, #12; CI #9). Next: task 5b.
+The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
 To read upstream code, open it on GitHub or `git clone` it and only read the files. Never run pnpm install, node, a build, docker or tests on this computer.
-- Do not run pnpm, node, npm, vitest, Docker, Postgres, the engine, or the Python tests here. Ray's PC slows down when they run.
+- Do not run pnpm, node, npm, vitest, Docker, Postgres, the engine, or the Python tests here. they slow the owner's computer.
 - Every check runs in GitHub Actions, in the repo's `ci` workflow, on your PR. The repo is public, so CI costs nothing.
 - Your loop for each task:
   1. Write the code.
@@ -54,7 +55,7 @@ To read upstream code, open it on GitHub or `git clone` it and only read the fil
 ## What you are building
 
 - **This repo, `RokctAI/sticks-server`, holds our changes to the upstream engine.** The engine is the open-source agent server at `https://github.com/elie222/rakazo` (Apache-2.0). This repo holds no copy of its source.
-- **The design is fixed.** It is in `RokctAI/core`, file `docs/sticks-saas-backend-spec.md` (merged 14 Nov in core#1533). That file is the Fable 5.2 SaaS spec Ray pasted (first opened as core#1485), revised with Ray's later rulings. Read it once before task 1, and again for each task: every task names its spec section. Where this brief and the spec differ, the spec wins; say so in the PR.
+- **The design is fixed.** It is in `RokctAI/core`, file `docs/sticks-saas-backend-spec.md` (merged 14 Nov in core#1533). That file is the SaaS spec (first opened as core#1485), revised with the owner's later rulings. Read it once before task 1, and again for each task: every task names its spec section. Where this brief and the spec differ, the spec wins; say so in the PR.
 - **The target:** one Docker container per tenant holds three processes.
   - **Pulsar** is our Python backend from `RokctAI/core`. It holds accounts, roles, credits and settings.
   - **The engine** is upstream, trimmed to one Node process.
@@ -87,7 +88,7 @@ Where a task here needs one of these, build our side against a fake in the tests
    - No personal names or Stick names in code, defaults or tests.
    - No `rakazo` in any new file or folder name. Use `sticks` or `engine`.
 6. **Do not edit upstream files.**
-   - **We fork once and never follow upstream again** (Ray, 11-15). Never add work whose only purpose is keeping up with upstream Rakazo (no sync, no re-sync checks, no exit-code contract work).
+   - **We fork once and never follow upstream again** (the owner, 11-15). Never add work whose only purpose is keeping up with upstream Rakazo (no sync, no re-sync checks, no exit-code contract work).
    - Our TypeScript goes under `overlay/`. An overlay file MAY replace an upstream file of the same path when that is simpler than a patch. In task 5's PR, change `build_engine.py` so overwriting is allowed (list the replaced files in the build log instead of refusing).
    - `patches/` stays usable for small edits; no reason line needed.
 7. **Never delete feature code.** If something should go, say so in the PR and leave it.
@@ -100,7 +101,7 @@ Where a task here needs one of these, build our side against a fake in the tests
 9. **Label every number in the PR.** Mark it **[measured]**, with a link to the CI job summary it came from, or **[estimate]**. Never present a guess as measured. You measure nothing on this computer.
 10. **When the spec does not settle something, stop.** Write `BLOCKED: <question>` in the PR and stop that task. Do not invent a design. Items listed under "Proposals, not yet decided" in the spec's section 13 are NOT to be built.
 11. **After opening each PR (you have no messaging tool, so do not try to send anything):**
-    - End your reply with a short block for Ray to paste into the project chat:
+    - End your reply with a short block for the owner to paste into the project chat:
       - the PR number and link;
       - the CI run link and its result;
       - one line saying what it does;
@@ -264,7 +265,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
   - the `sticks` self-test in Docker (item 6).
 - You build no images on this computer.
 
-### Task 18: end-of-day memory into Engram (Ray's ruling of 14 Nov; needs 7 and 13)
+### Task 18: end-of-day memory into Engram (the owner's ruling of 14 Nov; needs 7 and 13)
 - Once a day per tenant, at the tenant's end of day, an item due at that time does the following:
   1. for each chat active that day, summarise it with the engine's own history-summary code, through the gateway;
   2. write the lasting facts to Engram through a new memory-provider adapter (`rokct`), beside upstream's Supermemory, Serenity and Honcho;
@@ -297,4 +298,4 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - Do NOT build who writes new plugins (a builder Stick or a hub service). The spec leaves that open.
 
 ## When you are done with all of them
-Reply to Ray with one line per PR: the number, the title, and merged / open / blocked.
+Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
