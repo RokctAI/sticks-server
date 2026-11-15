@@ -39,7 +39,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. The owner keeps it current as PRs merge.
 
 
-Status as of 2026-11-15: tasks 1-5 and 5b merged (#7, #8, #10, #11, #12, #14; CI #9). Next: task 6.
+Status as of 2026-11-15: tasks 1-5 and 5b merged (#7, #8, #10, #11, #12, #14; CI #9). Task 6 is #17. Next: task 6b, then 7.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -167,6 +167,12 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - `organizations/create` and `spaces/create` are refused with a clear error.
 - Add `scripts/measure_engine.py --workdir <dir> --summary <file>`. It starts the built engine against a Testcontainers Postgres, reads its idle memory (RSS), and writes a small table to the summary file.
 - CI's Measurements job runs it. Copy the number into the PR as [measured], with the CI link.
+
+### Task 6b: cut messaging and the adapters barrel (spec §11.2, §9; needs 6; one PR, branch kilo/cut-messaging-adapters)
+Decided, do not ask again:
+- **Messaging:** spec §11.2 settles it. Cut every messaging app and the team-chat bridge (not mounted, not imported). Keep only `messaging/status`, which returns "none". Sticks talk to the user through the Sticks app and the onboarding chat only. Edit `apps/api/src/app.ts`, the router and the bridge directly (patch in `patches/`). Keep the routing test green: nothing in `contracts/used-procedures.txt` may 404.
+- **Adapters barrel:** stop importing `@rakazo/adapters` as one barrel. In `app.ts`, import each provider we use from its own module path, and build only those. Providers we use: Postgres, the model and speech gateway (task 13), the in-container computer and sandbox (tasks 15-16), and the storage the engine already needs. Everything else is not imported. If a cut provider is still referenced, guard it so it is never constructed.
+- Re-run the Measurements job and put the new idle RSS [measured] in the PR, beside 635.9 MB (#17). Target 150 MB. If it is still above 300 MB, list the five largest modules loaded at idle (from a heap or require trace in CI) and stop there.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
