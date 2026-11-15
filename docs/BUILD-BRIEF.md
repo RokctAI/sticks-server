@@ -37,7 +37,20 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 
 
 ## How to use this file
-This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. The owner keeps it current as PRs merge.
+This file is the whole brief. Read it on `main`. The owner keeps it current as PRs merge.
+
+## How a session runs (owner, 11-15; this overrides any older "stop" or "report" rule)
+- Work through **every** task whose needs are already merged on `main`, in the order below. One draft PR per task, each branched from the latest `main`. Never stack.
+- Do not wait for CI. Push, open the PR, and go straight to the next task. Never start a background monitor, watcher or sleep loop.
+- Before you report, read each PR's checks once (`gh pr checks <n>`). Fix any red ones, push, and move on.
+- **Report only** when every task left needs a PR that is not merged yet, or after about five PRs, whichever comes first. Then send ONE report for all of them: per PR the number, link, one line on what it does, CI result, and the claims to verify.
+
+### Which open tasks can run in the same session
+After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is already merged:
+- **Independent now (each needs only task 5, 3 or 6):** 7, 9, 13, 15, 19, 20.
+- **Once 7 is merged:** 8. **Once 9 is merged:** 10 and 11. **Once 15 is merged:** 16 and 17.
+- **Once 7 and 9 are merged:** 12. **Once 7 and 12 are merged:** 14. **Once 7 and 13 are merged:** 18.
+So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a chain, so open only the first unmerged one.
 
 
 Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b-1, then 6b-2, 6b-3, then 7.
