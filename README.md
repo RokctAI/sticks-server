@@ -10,6 +10,8 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | `patches/` | Our ordered patch set (`series`). Empty today: stock upstream until a real change is needed. |
 | `contracts/used-procedures.txt` | The server calls our Dart app makes (generated from the Dart source by `scripts/extract_used_procedures.py`). Checked against every new upstream tag. |
 | `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, writes a report. Never pushes. |
+| `overlay/` | Our engine code as new files only, copied onto the pinned upstream checkout at the same paths by the build. See `overlay/README.md`. |
+| `scripts/build_engine.py` | Clones the pinned tag into `--workdir`, applies `patches/series`, copies `overlay/` on top (refuses on any collision), then runs upstream's install, typecheck and our overlay tests. Run by CI's Engine job. |
 | `scripts/render_env.py` | Prints the image lines (tag + digest) the hub adds to a tenant's `.env`. |
 | `templates/stick-defaults.md` | The default instruction block every Stick gets (use the shared board, work through a list without stopping). Applied by the backend with `scripts/stick_defaults.py`, never by patching upstream's prompt. |
 | `scripts/keep_going.py` | Keep-going loop: when a Stick's run ends with open board tickets or scratchpad items and it is not waiting on the owner, send one "continue". On for every Stick by default (each can be switched off); capped tries, per-day count and spend. Policy sample in `deploy/keep-going.sample.json`. Logic and tests only; the backend supplies the client. |
