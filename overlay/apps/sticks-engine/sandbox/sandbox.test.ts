@@ -189,6 +189,62 @@ describe("the browser for one run (brief task 15)", () => {
   });
 });
 
+describe.skipIf(!POSIX)("review defects in #35 (POSIX)", () => {
+  let root: string;
+  let outside: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "sticks-review-"));
+    outside = await mkdtemp(join(tmpdir(), "sticks-review-outside-"));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("(a) write refuses a symlink target and leaves the file it points to untouched", async () => {
+    await writeFile(join(outside, "target.txt"), "original");
+    const home = stickHome(root, "d1");
+    await mkdir(home, { recursive: true });
+    await symlink(join(outside, "target.txt"), join(home, "link.txt"));
+    const reply = await handleRequest(root, { id: "a1", op: "write", stickId: "d1", path: "link.txt", content: "pwned" });
+    expect(reply.ok).toBe(false);
+    expect((reply as { error: string }).error).toContain("symlink");
+    expect(await readFile(join(outside, "target.txt"), "utf8")).toBe("original");
+  });
+
+  it("(b) list refuses a folder that is a symlink to outside the home", async () => {
+    const home = stickHome(root, "d2");
+    await mkdir(home, { recursive: true });
+    await symlink(outside, join(home, "dirlink"));
+    const reply = await handleRequest(root, { id: "b1", op: "list", stickId: "d2", path: "dirlink" });
+    expect(reply.ok).toBe(false);
+    expect((reply as { error: string }).error).toContain("leaves");
+  });
+
+  it("(c) write checks the nearest existing folder before creating anything under it", async () => {
+    const home = stickHome(root, "d3");
+    await mkdir(home, { recursive: true });
+    await symlink(outside, join(home, "linkdir"));
+    const reply = await handleRequest(root, { id: "c1", op: "write", stickId: "d3", path: "linkdir/sub/x.txt", content: "x" });
+    expect(reply.ok).toBe(false);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("(d) a timed-out command answers after the grace period, with timedOut set, even when a setsid job holds the pipes", async () => {
+    const started = Date.now();
+    const reply = await handleRequest(root, {
+      id: "d1",
+      op: "exec",
+      stickId: "d4",
+      command: "setsid sleep 6 & echo started",
+      timeoutMs: 300,
+    });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(reply.ok).toBe(true);
+    expect((reply as { result: { timedOut: boolean } }).result.timedOut).toBe(true);
+  });
+});
+
 describe("the self-test (brief task 15)", () => {
   it("names the addresses it must not reach, including the private ranges and metadata", () => {
     const labels = selftestTargets({ postgresHost: "10.9.9.9", postgresPort: 5432, ownAddress: "10.1.1.1" }).map(
