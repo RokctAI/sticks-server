@@ -57,7 +57,8 @@ class OverlayTypecheck(unittest.TestCase):
 
     def test_overlay_tsconfig_extends_the_upstream_base(self):
         text = (ROOT / "overlay" / "apps" / "sticks-engine" / "tsconfig.json").read_text(encoding="utf-8")
-        self.assertIn('"extends": "../../../tsconfig.base.json"', text)
+        # tsconfig.json sits in apps/sticks-engine/, so the checkout root is two levels up.
+        self.assertIn('"extends": "../../tsconfig.base.json"', text)
 
 
 if __name__ == "__main__":
