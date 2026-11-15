@@ -11,8 +11,9 @@ Your work list for this session, in order. Open one draft PR for EACH line befor
 3. Task 13 (gateway: protocol is decided, see task 13; build it)
 4. Task 15 (sandbox helper)
 5. Task 20 (apps without a plugin)
+6. Task 6b-4 (lazy email and CSS tooling)
 After each PR is pushed, go straight to the next line. Do not check CI between them. "Not started" is never a valid status: each line ends as a PR or as `BLOCKED: <reason>` written in the report.
-Only when all five lines are done: write ONE report PR covering all of them, then reply in two lines.
+Only when all six lines are done: write ONE report PR covering all of them, then reply in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
@@ -209,9 +210,14 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - One patch (`patches/0004-...`) touching: app.ts, the router deps, `routes/messaging.ts`, the team-chat judge and inbound paths, the thread-send path, and the account-import hooks. Where code needs a messaging object, pass a no-op object that does nothing and reports "none"; that keeps type changes small.
 - CI typecheck is your compiler: push, read the tsc errors with `gh run view --log-failed`, fix, push again. Several CI rounds are expected and fine.
 
-#### Task 6b-3: find what uses the memory, in CI (decided 11-15; needs 6b-2; branch rokct/memory-profile)
+#### Task 6b-3: DONE (merged as #28; 405.1 MB built, 622.1 MB tsx [measured], run 43738227283). Find what uses the memory, in CI (decided 11-15; needs 6b-2; branch rokct/memory-profile)
 - Measurement only, no barrel changes. In `scripts/measure_engine.py`, for the built run, also start node with `--heap-prof` (or take one heap snapshot after the 10 s settle) and add a table to the job summary: the 15 largest packages by retained size at idle (group by `node_modules/<package>`), [measured].
 - That is all. Changing the barrel waits until the owner's thread reads that table and writes the next step here. Not your decision.
+
+#### Task 6b-4: lazy-load the email and CSS tooling (decided 11-15 from #28's table; needs 6b-3; branch rokct/lazy-email-css)
+- At idle the engine holds jsdom, css-tree, react-email, tailwindcss, sucrase, nodemailer (and their deps). Idle Sticks do not send email or render HTML. Find the modules that import them at load time (start from the mail/email-render modules in the adapters barrel) and change those imports to `await import()` inside the function that uses them. Exported names and types stay the same.
+- In `measure_engine.py`, split the "other" row of the heap table by URL prefix (node:, file: outside node_modules, eval/anonymous), so the next read shows where the 62% sits.
+- Record the new built RSS [measured]. Do not change the 150 MB target; if this step saves under 30 MB, say so in the report and stop the 6b chain there.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
