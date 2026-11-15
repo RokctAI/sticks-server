@@ -10,24 +10,11 @@ export const PROVIDER_AUTH: Readonly<Record<string, "x-api-key" | "bearer">> = {
 };
 
 /**
- * Environment variables that carry a provider's own key. The engine refuses to start if any is set to
- * a non-empty value (startEngine), so a provider key cannot reach a tenant through its environment.
+ * Any environment variable named like a provider key (`*_API_KEY`). The engine refuses to start if one
+ * is set to a non-empty value (startEngine), so a provider key cannot reach a tenant through its
+ * environment. The rule is the name pattern, not a fixed list, so a new provider is covered too.
  */
-export const PROVIDER_KEY_ENV_NAMES: readonly string[] = [
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "GOOGLE_API_KEY",
-  "GEMINI_API_KEY",
-  "MISTRAL_API_KEY",
-  "GROQ_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "XAI_API_KEY",
-  "ELEVENLABS_API_KEY",
-  "DEEPGRAM_API_KEY",
-  "ASSEMBLYAI_API_KEY",
-  "OPENAI_COMPATIBLE_API_KEY",
-];
+export const PROVIDER_KEY_ENV_PATTERN = /_API_KEY$/;
 
 const PROVIDER_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -52,7 +39,17 @@ export function readGatewayKey(secretsDir: string = SECRETS_DIR): string {
   return readSecret("gateway_key", secretsDir);
 }
 
-/** The provider key variables that are set (non-empty) in this environment. Empty values do not count. */
+/** The provider key variables (any `*_API_KEY`) set to a non-empty value. Empty values do not count. */
 export function providerKeysInEnv(env: NodeJS.ProcessEnv): string[] {
-  return PROVIDER_KEY_ENV_NAMES.filter((name) => (env[name] ?? "").trim() !== "");
+  return Object.keys(env)
+    .filter((name) => PROVIDER_KEY_ENV_PATTERN.test(name) && (env[name] ?? "").trim() !== "")
+    .sort();
+}
+
+/**
+ * A catalogue entry pointed at the gateway: its base URL becomes `${gateway}/<its provider>`. Every other
+ * field is kept as it is. Works on any model shape with `provider` and `baseUrl` (pi-ai's Model type).
+ */
+export function throughGateway<T extends { provider: string; baseUrl: string }>(model: T, gatewayUrl: string): T {
+  return { ...model, baseUrl: gatewayUrlFor(gatewayUrl, model.provider) };
 }

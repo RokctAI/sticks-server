@@ -9,6 +9,7 @@ import {
   gatewayUrlFor,
   providerKeysInEnv,
   readGatewayKey,
+  throughGateway,
 } from "./gateway.js";
 
 const KEY = "gw-test-key-0001";
@@ -53,6 +54,34 @@ describe("no provider key in the engine's environment (brief task 13)", () => {
 
   it("a provider key set in the environment is named, so startup can refuse it", () => {
     expect(providerKeysInEnv({ OPENAI_API_KEY: "sk-real-looking", PATH: "/bin" })).toEqual(["OPENAI_API_KEY"]);
+  });
+
+  it("ANY *_API_KEY variable is refused, not only the names the engine knows", () => {
+    expect(
+      providerKeysInEnv({ SOME_NEW_PROVIDER_API_KEY: "x", MISTRAL_API_KEY: "y", PATH: "/bin" }),
+    ).toEqual(["MISTRAL_API_KEY", "SOME_NEW_PROVIDER_API_KEY"]);
+  });
+
+  it("names that only contain the words are not provider keys", () => {
+    expect(providerKeysInEnv({ API_KEY_HINT: "x", OPENAI_API_KEY_FILE: "/run/secrets/k", GATEWAY_KEY: "x" })).toEqual(
+      [],
+    );
+  });
+});
+
+describe("catalogue entries point at the gateway (brief task 13)", () => {
+  it("each model's base URL becomes the gateway prefix for its own provider; other fields are kept", () => {
+    const model = { id: "claude", provider: "anthropic", baseUrl: "https://api.anthropic.com", api: "anthropic-messages" };
+    expect(throughGateway(model, "https://gw.example")).toEqual({
+      ...model,
+      baseUrl: "https://gw.example/anthropic",
+    });
+  });
+
+  it("a provider id that is not a plain name is refused", () => {
+    expect(() => throughGateway({ provider: "Bad Name", baseUrl: "x" }, "https://gw.example")).toThrow(
+      "not a provider id",
+    );
   });
 });
 
