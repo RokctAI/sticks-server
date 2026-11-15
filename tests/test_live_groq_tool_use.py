@@ -18,6 +18,8 @@ API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Both models the shared release workflow uses. Each one is checked on its own, so the run shows which passed.
 MODELS = ["groq/compound", "llama-3.3-70b-versatile"]
 KEY = os.environ.get("GROQ_API_KEY", "").strip()
+# Groq sits behind Cloudflare, which answers 403 (error 1010) to Python's default User-Agent.
+USER_AGENT = "sticks-live-check/1.0"
 
 TOOL = {
     "type": "function",
@@ -38,7 +40,7 @@ def chat(payload: dict) -> dict:
     request = urllib.request.Request(
         API_URL,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json", "User-Agent": USER_AGENT},
         method="POST",
     )
     try:
@@ -55,7 +57,7 @@ class GroqKey(unittest.TestCase):
         # GET /models: 200 for a valid key, 401 for an invalid one, 403 when the key lacks access.
         request = urllib.request.Request(
             "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {KEY}"},
+            headers={"Authorization": f"Bearer {KEY}", "User-Agent": USER_AGENT},
             method="GET",
         )
         try:
