@@ -142,7 +142,7 @@ export class HelperComputerProvider extends DesktopSandboxProvider {
     filePath: string,
     _context?: AdapterContext,
     options?: { maxBytes?: number },
-  ): Promise<Uint8Array> {
+  ) {
     const result = (await sendToHelper(this.socketPath, {
       op: "readBytes",
       stickId: computer.botId,
