@@ -4,8 +4,7 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
-## Rules
-- Branch names start with `rokct/`, never `kilo/` (owner, 11-15). that matter most
+## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
    - Reading upstream code is fine: open it on GitHub, or `git clone` it and only read the files. Installing or building it is not.
    - No pnpm, node, npm, vitest, Docker, Postgres, the engine or the Python tests.
@@ -14,7 +13,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
    - Read the result with `gh pr checks <n>`, and the failure log with `gh run view <id> --log-failed`.
    - Fix and push until it is green. A task is done only when CI is green.
 3. **One task = one draft PR to `main`.**
-   - Branch `rokct/<topic>`, made from the latest `main`.
+   - Branch `rokct/<topic>` (never `kilo/`), made from the latest `main`.
    - Never stacked, never force-pushed, never pushed to `main`.
    - Do not edit `.github/workflows/ci.yml`.
 4. **Fork forever.** We never follow upstream after v0.11.0. Overlay files may replace upstream files.
@@ -168,7 +167,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - Endpoints: `GET /health`.
 - Test: a vitest that starts the root against a test database (use upstream's `packages/testkit`), sends one message and sees one run complete.
 
-### Task 5b: DONE (merged as #14). pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch rokct/engine-pool-ip)
+### Task 5b: DONE (merged as #14). pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch kilo/engine-pool-ip)
 - **Pool idle close:** change upstream's `packages/db/src/client.ts` directly (patch in `patches/` or an overlay file replacing it; we never follow upstream). Make `idleTimeoutMillis` an option of `createPool`, default unchanged (0). The engine root passes 30000. Add a vitest case that the option reaches the pool.
 - **Overlay typecheck:** in `scripts/build_engine.py`, after the overlay is copied, run `tsc --noEmit` over our overlay files with a tsconfig in `overlay/` that extends upstream's base config. A type error fails the build. Do not edit ci.yml: the Engine job already runs build_engine.py.
 - **Client abort:** in serve.ts, when the client disconnects mid-stream (req "close"), cancel the response body stream and stop reading; add a test.
