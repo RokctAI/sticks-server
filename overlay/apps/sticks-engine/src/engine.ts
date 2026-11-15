@@ -7,6 +7,7 @@ import { deployMigrations } from "../../../packages/db/src/index.ts";
 import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/src/index.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { startBootScheduler } from "./boot-pass.js";
+import { providerKeysInEnv } from "./gateway.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -32,6 +33,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   const dir = options.secretsDir ?? env.STICKS_SECRETS_DIR ?? SECRETS_DIR;
   const base = env.STICKS_DATABASE_URL?.trim();
   if (!base) throw new Error("STICKS_DATABASE_URL is required");
+  // Provider keys reach the engine only through the gateway (brief task 13): refuse to start if one is set.
+  const providerKeys = providerKeysInEnv(env);
+  if (providerKeys.length > 0) {
+    throw new Error(`provider keys must not be in the engine's environment: ${providerKeys.join(", ")}`);
+  }
 
   const databaseUrl = databaseUrlWithPassword(base, readSecret("db_password", dir));
   const contentKey = readSecret("content_key", dir);
