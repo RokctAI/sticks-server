@@ -39,7 +39,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. the owner keeps it current as PRs merge.
 
 
-Status as of 2026-11-15: tasks 1-5 merged (#7, #8, #10, #11, #12; CI #9). Next: task 5b.
+Status as of 2026-11-15: tasks 1-5 and 5b merged (#7, #8, #10, #11, #12, #14; CI #9). Next: task 6.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -89,7 +89,7 @@ Where a task here needs one of these, build our side against a fake in the tests
    - No `rakazo` in any new file or folder name. Use `sticks` or `engine`.
 6. **Do not edit upstream files.**
    - **We fork once and never follow upstream again** (the owner, 11-15). Never add work whose only purpose is keeping up with upstream Rakazo (no sync, no re-sync checks, no exit-code contract work).
-   - Our TypeScript goes under `overlay/`. An overlay file MAY replace an upstream file of the same path when that is simpler than a patch. In task 5's PR, change `build_engine.py` so overwriting is allowed (list the replaced files in the build log instead of refusing).
+   - Our TypeScript goes under `overlay/` as new files. Edits to upstream files go in `patches/` (as in 0001). The build keeps refusing overlay files that would replace an upstream file; do not change that. Do not ask about this again.
    - `patches/` stays usable for small edits; no reason line needed.
 7. **Never delete feature code.** If something should go, say so in the PR and leave it.
 8. **Checks run in CI only** (the `ci` workflow):
@@ -154,7 +154,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - Endpoints: `GET /health`.
 - Test: a vitest that starts the root against a test database (use upstream's `packages/testkit`), sends one message and sees one run complete.
 
-### Task 5b: pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch kilo/engine-pool-ip)
+### Task 5b: DONE (merged as #14). pool idle close, client IP and overlay typecheck (needs 5; one small PR, branch kilo/engine-pool-ip)
 - **Pool idle close:** change upstream's `packages/db/src/client.ts` directly (patch in `patches/` or an overlay file replacing it; we never follow upstream). Make `idleTimeoutMillis` an option of `createPool`, default unchanged (0). The engine root passes 30000. Add a vitest case that the option reaches the pool.
 - **Overlay typecheck:** in `scripts/build_engine.py`, after the overlay is copied, run `tsc --noEmit` over our overlay files with a tsconfig in `overlay/` that extends upstream's base config. A type error fails the build. Do not edit ci.yml: the Engine job already runs build_engine.py.
 - **Client abort:** in serve.ts, when the client disconnects mid-stream (req "close"), cancel the response body stream and stop reading; add a test.
