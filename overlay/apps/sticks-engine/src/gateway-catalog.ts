@@ -4,7 +4,7 @@
 // the original is not changed. Used by the catalogue patch (see docs/gateway-protocol.md, "Not in this contract").
 import { gatewayUrlFor, throughGateway } from "./gateway.js";
 
-type GatewayEntry = { provider: string; baseUrl: string };
+type GatewayEntry = { id?: string; provider: string; baseUrl: string };
 
 /** The part of a pi-ai provider this helper reads. */
 export type CatalogSource = {
