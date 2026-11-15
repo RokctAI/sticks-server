@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Measure the built engine: idle memory (RSS) of its process tree, against a disposable Postgres.
+"""Measure the engine: idle memory (RSS) of its process tree, run two ways, against a disposable Postgres.
 
 Steps:
   1. build the engine (scripts/build_engine.py) into <workdir>/build;
-  2. start a disposable Postgres 18 with the docker CLI (the Testcontainers image, via the same
+  2. bundle the engine entry with esbuild (upstream's own dev dependency) into one file, run by plain
+     node. Workspace packages are bundled; packages from node_modules stay external;
+  3. start a disposable Postgres 18 with the docker CLI (the Testcontainers image, via the same
      mirror prefix CI sets for Testcontainers);
-  3. write the two secrets to a temp folder and start the built engine (overlay index.ts) with
-     the benchmark settings from upstream's testkit (scripted model, fake sandbox);
-  4. wait for GET /health, let it settle, then sum VmRSS over the engine's process tree (Linux /proc);
-  5. write a small markdown table to --summary (CI passes $GITHUB_STEP_SUMMARY) and clean up.
+  4. run the engine twice, one after the other, on that Postgres with the benchmark settings from
+     upstream's testkit (scripted model, fake sandbox): first from source under tsx, then the bundle
+     under plain node. For each run: wait for GET /health, let it settle, then sum VmRSS over the
+     engine's process tree (Linux /proc);
+  5. write a small markdown table with both numbers to --summary (CI passes $GITHUB_STEP_SUMMARY).
 
 The numbers are only meaningful on the CI runner. This script is run by CI's Measurements job.
 
-Exit codes: 0 measured; 1 the engine did not start or answer; 2 the build failed or the environment
-is not usable.
+Exit codes: 0 measured; 1 an engine did not start or answer; 2 the build, the bundle or the
+environment is not usable.
 
 Usage:
   python scripts/measure_engine.py --workdir <empty or missing folder> --summary <file>
@@ -25,6 +28,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -36,8 +40,49 @@ ROOT = Path(__file__).resolve().parent.parent
 POSTGRES_IMAGE = "postgres:18-alpine"
 SETTLE_SECONDS = 10
 HEALTH_TIMEOUT_SECONDS = 180
+ENGINE_ENTRY = "apps/sticks-engine/src/index.ts"
+BUNDLE_OUT = "apps/sticks-engine/dist/sticks-engine.mjs"
 
 EXIT_OK, EXIT_NO_ENGINE, EXIT_ENV = 0, 1, 2
+
+# Written into the build checkout and run with node. Workspace packages are bundled (their .ts
+# sources resolve through package.json); anything resolved inside node_modules stays external and is
+# imported by absolute path, so pnpm's per-package links still resolve from where the package lives.
+BUNDLER_JS = """\
+// Written by scripts/measure_engine.py into the build checkout. Not part of the repository.
+import * as esbuild from "esbuild";
+const NODE_MODULES = /[\\\\/]node_modules[\\\\/]/;
+await esbuild.build({
+  entryPoints: ["%(entry)s"],
+  outfile: "%(out)s",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  logLevel: "warning",
+  banner: {
+    js: 'import { createRequire as __sticksCreateRequire } from "node:module"; const require = __sticksCreateRequire(import.meta.url);',
+  },
+  plugins: [
+    {
+      name: "external-node-modules",
+      setup(build) {
+        build.onResolve({ filter: /^[^./]/ }, async (args) => {
+          if (args.pluginData && args.pluginData.resolving) return undefined;
+          const resolved = await build.resolve(args.path, {
+            resolveDir: args.resolveDir,
+            kind: args.kind,
+            pluginData: { resolving: true },
+          });
+          if (resolved.errors.length || !resolved.path) return undefined;
+          if (NODE_MODULES.test(resolved.path)) return { path: resolved.path, external: true };
+          return undefined;
+        });
+      },
+    },
+  ],
+});
+""" % {"entry": ENGINE_ENTRY, "out": BUNDLE_OUT}
 
 
 # ---- pure helpers (tested in tests/test_measure_engine.py) ----------------------------------
@@ -66,20 +111,21 @@ def descendants(root: int, parent_of: dict[int, int]) -> list[int]:
     return found
 
 
-def format_summary(rss_kb: int, processes: int, cold_start_note: str = "") -> str:
-    """The markdown table written to the job summary."""
+def format_summary(runs: list[tuple[str, int, int]]) -> str:
+    """The markdown table for the job summary. runs: (label, RSS in kB, processes in the tree)."""
     lines = [
         "## Engine idle memory (scripts/measure_engine.py)",
         "",
-        "| Measure | Value |",
-        "|---|---|",
-        f"| Idle RSS, engine process tree | {rss_kb / 1024:.1f} MB |",
-        f"| Processes in the tree | {processes} |",
-        "| Postgres | " + POSTGRES_IMAGE + " (disposable, docker CLI) |",
-        "| Settle time before reading | " + str(SETTLE_SECONDS) + " s |",
+        "| Run | Idle RSS, engine process tree | Processes in the tree |",
+        "|---|---|---|",
     ]
-    if cold_start_note:
-        lines.append(f"| Note | {cold_start_note} |")
+    for label, rss_kb, processes in runs:
+        lines.append(f"| {label} | {rss_kb / 1024:.1f} MB | {processes} |")
+    lines += [
+        "",
+        f"Postgres: {POSTGRES_IMAGE} (disposable, docker CLI). Settle time before reading: "
+        f"{SETTLE_SECONDS} s. Both runs use the same Postgres, one after the other.",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -135,6 +181,23 @@ def build(workdir: Path) -> Path | None:
     return target / "up"
 
 
+def bundle(checkout: Path) -> Path | None:
+    """Bundle the engine entry into one ESM file with esbuild, run by node. None on failure."""
+    step("bundle the engine with esbuild (workspace packages in, node_modules external)")
+    node = shutil.which("node")
+    if not node:
+        print("node not found; CI sets it up with setup-node", file=sys.stderr)
+        return None
+    (checkout / "bundle-engine.mjs").write_text(BUNDLER_JS, encoding="utf-8", newline="\n")
+    r = subprocess.run([node, "bundle-engine.mjs"], cwd=checkout, text=True, capture_output=True, check=False)
+    if r.returncode != 0 or not (checkout / BUNDLE_OUT).is_file():
+        print(r.stdout[-2000:], r.stderr[-3000:], sep="\n", file=sys.stderr)
+        return None
+    size_mb = (checkout / BUNDLE_OUT).stat().st_size / (1024 * 1024)
+    print(f"bundle: {BUNDLE_OUT} ({size_mb:.1f} MB)")
+    return checkout / BUNDLE_OUT
+
+
 def start_postgres() -> tuple[str, str, str]:
     """(container id, host port, password). The image comes through the Testcontainers mirror if set."""
     image = POSTGRES_IMAGE
@@ -167,7 +230,7 @@ def write_secrets(folder: Path, db_password: str) -> None:
     (folder / "content_key").write_text(secrets.token_urlsafe(32), encoding="utf-8", newline="\n")
 
 
-def engine_env(port: str, db_port: str, secrets_dir: Path, data_dir: Path, api_port: int) -> dict[str, str]:
+def engine_env(db_port: str, secrets_dir: Path, data_dir: Path, api_port: int) -> dict[str, str]:
     """The benchmark settings from upstream's testkit (performance-stack.ts), plus our database URL."""
     origin = f"http://127.0.0.1:{api_port}"
     env = dict(os.environ)
@@ -199,8 +262,6 @@ def engine_env(port: str, db_port: str, secrets_dir: Path, data_dir: Path, api_p
 
 
 def free_port() -> int:
-    import socket
-
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -222,6 +283,41 @@ def wait_for_health(api_port: int, proc: subprocess.Popen) -> bool:
     return False
 
 
+def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: Path) -> tuple[int, int]:
+    """Start the engine with argv, wait for /health, settle, read the tree's RSS, stop it.
+
+    Returns (RSS in kB, processes in the tree). Raises RuntimeError with the engine's stderr tail if
+    it does not answer.
+    """
+    api_port = free_port()
+    step(f"{label}: start on 127.0.0.1:{api_port}")
+    stderr_path = tmp / f"{label.split()[0]}.err"
+    data_dir = tmp / f"data-{label.split()[0]}"
+    proc = None
+    with open(stderr_path, "w", encoding="utf-8") as stderr_file:
+        try:
+            proc = subprocess.Popen(
+                argv,
+                cwd=checkout,
+                env=engine_env(db_port, tmp / "secrets", data_dir, api_port),
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_file,
+            )
+            if not wait_for_health(api_port, proc):
+                raise RuntimeError(f"{label}: the engine did not answer GET /health\n"
+                                   + stderr_path.read_text(encoding="utf-8")[-3000:])
+            step(f"{label}: settle {SETTLE_SECONDS} s, then read RSS")
+            time.sleep(SETTLE_SECONDS)
+            return tree_rss_kb(proc.pid)
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True, help="folder for the build (missing or empty)")
@@ -240,45 +336,32 @@ def main() -> int:
     checkout = build(workdir)
     if checkout is None:
         return EXIT_ENV
+    bundle_path = bundle(checkout)
+    if bundle_path is None:
+        return EXIT_ENV
+    node = shutil.which("node")
+    tsx = checkout / "node_modules" / ".bin" / "tsx"
 
     tmp = Path(tempfile.mkdtemp(prefix="sticks-measure-"))
     cid = None
-    proc = None
     try:
         cid, db_port, db_password = start_postgres()
-        secrets_dir = tmp / "secrets"
-        write_secrets(secrets_dir, db_password)
-        api_port = free_port()
-        step(f"start the built engine on 127.0.0.1:{api_port}")
-        tsx = checkout / "node_modules" / ".bin" / "tsx"
-        proc = subprocess.Popen(
-            [str(tsx), "apps/sticks-engine/src/index.ts"],
-            cwd=checkout,
-            env=engine_env(str(api_port), db_port, secrets_dir, tmp / "data", api_port),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if not wait_for_health(api_port, proc):
-            err = proc.stderr.read() if proc.stderr and proc.poll() is not None else ""
-            print("the engine did not answer GET /health", file=sys.stderr)
-            print(err[-3000:], file=sys.stderr)
+        write_secrets(tmp / "secrets", db_password)
+        try:
+            tsx_rss, tsx_count = measure_run("tsx (source)", [str(tsx), ENGINE_ENTRY], checkout, db_port, tmp)
+            built_rss, built_count = measure_run("built (plain node)", [node, BUNDLE_OUT], checkout, db_port, tmp)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
             return EXIT_NO_ENGINE
-        step(f"settle {SETTLE_SECONDS} s, then read RSS")
-        time.sleep(SETTLE_SECONDS)
-        rss, count = tree_rss_kb(proc.pid)
-        table = format_summary(rss, count)
+        table = format_summary([
+            ("tsx (source, as before)", tsx_rss, tsx_count),
+            ("built (esbuild bundle, plain node)", built_rss, built_count),
+        ])
         with open(args.summary, "a", encoding="utf-8", newline="\n") as summary:
             summary.write(table)
         print(table)
         return EXIT_OK
     finally:
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                proc.kill()
         if cid:
             subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
         shutil.rmtree(tmp, ignore_errors=True)
