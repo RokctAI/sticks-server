@@ -1,6 +1,6 @@
 # Manual live check: a real model (Groq) must call a tool with schema-valid arguments. Runs only when started by
 # hand (workflow_dispatch), never on pull requests or pushes, so a free-tier key is not spent on every change.
-# The key is a repository secret named GROQ_API_KEY. If it is not set, the test is skipped and the job passes.
+# The key is the Actions secret GROQ_API (the same secret the shared release workflow uses). If it is not visible to this repo, the test is skipped and the job passes.
 name: Live tool-use (Groq)
 
 on:
@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
       - name: Run the live check
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API }}
         run: |
           if [ -z "$GROQ_API_KEY" ]; then
             echo "GROQ_API_KEY is not set; the live check is skipped." >> "$GITHUB_STEP_SUMMARY"
