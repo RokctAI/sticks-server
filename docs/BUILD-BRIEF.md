@@ -172,7 +172,7 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 Decided, do not ask again:
 - **Messaging:** spec §11.2 settles it. Cut every messaging app and the team-chat bridge (not mounted, not imported). Keep only `messaging/status`, which returns "none". Sticks talk to the user through the Sticks app and the onboarding chat only. Edit `apps/api/src/app.ts`, the router and the bridge directly (patch in `patches/`). Keep the routing test green: nothing in `contracts/used-procedures.txt` may 404.
 - **Adapters barrel:** stop importing `@rakazo/adapters` as one barrel. In `app.ts`, import each provider we use from its own module path, and build only those. Providers we use: Postgres, the model and speech gateway (task 13), the in-container computer and sandbox (tasks 15-16), and the storage the engine already needs. Everything else is not imported. If a cut provider is still referenced, guard it so it is never constructed.
-- Re-run the Measurements job and put the new idle RSS [measured] in the PR, beside 635.9 MB (#17). Target 150 MB. If it is still above 300 MB, list the five largest modules loaded at idle (from a heap or require trace in CI) and stop there.
+- Re-run the Measurements job and put the new idle RSS [measured] in the PR, beside 635.9 MB [measured] (#17, run 43731318899; that run started the engine under tsx, so it likely overstates). Measure the built output, not tsx. Target 150 MB. If it is still above 300 MB, list the five largest modules loaded at idle (from a heap or require trace in CI) and stop there.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
