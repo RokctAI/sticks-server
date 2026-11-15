@@ -11,7 +11,7 @@ Your work list for this session, in order. One draft PR per line (lines 1 and 2 
 2. **Update report #38:** 6b-4 = 389.8 MB built, 633.1 MB tsx, run 43740661607; the largest heap item is node builtins at 56%; 6b chain stopped. Then keep appending this session's work to it.
 3. Task 8 (idle and next-wake endpoint; 7 is merged).
 4. Task 13b (new): wire the model catalogue to the gateway (the base URL and key per provider, as task 13 says). Change the start-up check to refuse ANY env var ending in `_API_KEY`, not a fixed list. Needs #34 merged; if it is not merged yet, write BLOCKED and go on.
-5. Task 9b (new): mount the Pulsar-token verifier from #33 as the sign-in route, and turn off password, passkey and SSO sign-in.
+5. Task 9b (new): mount the Pulsar-token verifier from #33 as the sign-in route, and turn off password, passkey and SSO sign-in. If the sender kind and id, the transport header or the Guest role are not written in docs/pulsar-engine-interface.md as settled by the owner, write BLOCKED and do not guess. Do not unmount any sign-in route until a test proves the token route signs a user in.
 6. Task 21 (plugin builder skill).
 7. Task 22 (GitHub plugin).
 8. Task 18 (end-of-day memory into Engram; needs 13b).
