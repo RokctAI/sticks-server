@@ -5,15 +5,17 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
 ## DO THIS NOW (read first; overrides everything below)
-Your work list for this session, in order. Open one draft PR for EACH line before you write any report or reply:
-1. Task 7 (memory job driver)
-2. Task 9 (sign-in by Pulsar token)
-3. Task 13 (gateway: protocol is decided, see task 13; build it)
-4. Task 15 (sandbox helper)
-5. Task 20 (apps without a plugin)
-6. Task 6b-4 (lazy email and CSS tooling)
-After each PR is pushed, go straight to the next line. Do not check CI between them. "Not started" is never a valid status: each line ends as a PR or as `BLOCKED: <reason>` written in the report.
-Only when all six lines are done: write ONE report PR covering all of them, then reply in two lines.
+Merged since the last list: 7 (#32), 9 verifier only (#33, sign-in not wired yet), 20 (#36), 6b-4 (#37). Task 13 is #34 (merging). The 6b chain is STOPPED: idle is 389.8 MB built, and the largest heap item is node builtins (56%), which no package change touches.
+Your work list for this session, in order. One draft PR per line (lines 1 and 2 push to existing PRs):
+1. **Fix #35 (task 15), push to its branch.** Four defects from review, each with a test: (a) `write` must refuse a symlink target (realpath it if it exists, or open with O_NOFOLLOW); (b) `list` must run the inside-folder check on its target; (c) `write` must check the deepest existing ancestor with realpath BEFORE mkdir; (d) on timeout, kill the group, then resolve with `timedOut: true` after a short grace and destroy the pipes, without waiting for "close" (test with `setsid sleep 6 &`). Also set `process.umask(0o177)` around listen, and make the doc comment say "owner only".
+2. **Update report #38:** 6b-4 = 389.8 MB built, 633.1 MB tsx, run 43740661607; the largest heap item is node builtins at 56%; 6b chain stopped. Then keep appending this session's work to it.
+3. Task 8 (idle and next-wake endpoint; 7 is merged).
+4. Task 13b (new): wire the model catalogue to the gateway (the base URL and key per provider, as task 13 says). Change the start-up check to refuse ANY env var ending in `_API_KEY`, not a fixed list. Needs #34 merged; if it is not merged yet, write BLOCKED and go on.
+5. Task 9b (new): mount the Pulsar-token verifier from #33 as the sign-in route, and turn off password, passkey and SSO sign-in. If the sender kind and id, the transport header or the Guest role are not written in docs/pulsar-engine-interface.md as settled by the owner, write BLOCKED and do not guess. Do not unmount any sign-in route until a test proves the token route signs a user in.
+6. Task 21 (plugin builder skill).
+7. Task 22 (GitHub plugin).
+8. Task 18 (end-of-day memory into Engram; needs 13b).
+After each PR is pushed, go straight to the next line. Do not check CI between them. Each line ends as a PR or as `BLOCKED: <reason>` in the report. Only then reply, in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
@@ -214,12 +216,12 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Measurement only, no barrel changes. In `scripts/measure_engine.py`, for the built run, also start node with `--heap-prof` (or take one heap snapshot after the 10 s settle) and add a table to the job summary: the 15 largest packages by retained size at idle (group by `node_modules/<package>`), [measured].
 - That is all. Changing the barrel waits until the owner's thread reads that table and writes the next step here. Not your decision.
 
-#### Task 6b-4: lazy-load the email and CSS tooling (decided 11-15 from #28's table; needs 6b-3; branch rokct/lazy-email-css)
+#### Task 6b-4: DONE (merged as #37; no lazy import possible without changing exports; 6b chain stopped). Lazy-load the email and CSS tooling (decided 11-15 from #28's table; needs 6b-3; branch rokct/lazy-email-css)
 - At idle the engine holds jsdom, css-tree, react-email, tailwindcss, sucrase, nodemailer (and their deps). Idle Sticks do not send email or render HTML. Find the modules that import them at load time (start from the mail/email-render modules in the adapters barrel) and change those imports to `await import()` inside the function that uses them. Exported names and types stay the same.
 - In `measure_engine.py`, split the "other" row of the heap table by URL prefix (node:, file: outside node_modules, eval/anonymous), so the next read shows where the 62% sits.
 - Record the new built RSS [measured]. Do not change the 150 MB target; if this step saves under 30 MB, say so in the report and stop the 6b chain there.
 
-### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
+### Task 7: DONE (merged as #32). the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
   - runs whose lease expired;
   - waiting runs now due;
@@ -237,7 +239,7 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Protect `/internal/*` with the per-tenant secret read from `/run/secrets/engine_secret`.
 - Extend `scripts/measure_engine.py` to also time a cold start to the first response (target: 3 s). Spec §9.7 item 1 says these numbers decide between stopping and freezing a sleeping tenant. Take both numbers from CI's Measurements job.
 
-### Task 9: sign-in by Pulsar token (spec §5.3 row 1, §7.2, §11.1 "Sign-in"; needs 5)
+### Task 9: verifier merged as #33; wiring is task 9b. sign-in by Pulsar token (spec §5.3 row 1, §7.2, §11.1 "Sign-in"; needs 5)
 - The engine accepts only a short-lived token signed by Pulsar: ed25519, payload `{tenant, user, role, exp}`. Read core's `pulsar.envelope` code in `RokctAI/core` and match its format exactly.
 - The public key comes from `/run/secrets/pulsar_public_key`.
 - The first valid token for a new user creates the thin user row.
@@ -342,7 +344,7 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - **Add `deploy/onboarding-connector.sample.json`:** the connector entry for the three control-SDK tools (onboarding state, save answer, finish), with placeholder URLs.
 - No code.
 
-### Task 20: apps without a plugin still work in the trimmed engine (spec §4.7; needs 6)
+### Task 20: DONE (merged as #36). apps without a plugin still work in the trimmed engine (spec §4.7; needs 6)
 - Check that upstream's paths for adding tools still work in the trimmed engine (`docs/integrations.md`, "Add your own tools"; `docs/build-a-plugin.md`):
   - an OpenAPI or GraphQL connector (a description file only);
   - an MCP plugin (`plugin.json` plus `mcp.json`).
