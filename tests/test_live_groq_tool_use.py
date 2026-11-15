@@ -63,7 +63,8 @@ class GroqKey(unittest.TestCase):
                 status = response.status
                 ids = [m.get("id") for m in json.loads(response.read().decode("utf-8")).get("data", [])]
         except urllib.error.HTTPError as error:
-            print(f"RESULT /models: HTTP {error.code}")
+            body = error.read().decode("utf-8", "replace")[:300]
+            print(f"RESULT /models: HTTP {error.code}; body starts: {body!r}")
             self.fail(f"/models answered HTTP {error.code}")
         print(f"RESULT /models: HTTP {status}, {len(ids)} models visible")
         self.assertIn("llama-3.3-70b-versatile", ids)
