@@ -39,7 +39,7 @@ Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its
 This file is the whole brief. Read it on `main`, find the first task not marked DONE, and continue. The owner keeps it current as PRs merge.
 
 
-Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b, then 7.
+Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b-1, then 6b-2, 6b-3, then 7.
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -168,11 +168,22 @@ It adds `.github/workflows/ci.yml`. Do not edit that file in your tasks. If a jo
 - Add `scripts/measure_engine.py --workdir <dir> --summary <file>`. It starts the built engine against a Testcontainers Postgres, reads its idle memory (RSS), and writes a small table to the summary file.
 - CI's Measurements job runs it. Copy the number into the PR as [measured], with the CI link.
 
-### Task 6b: cut messaging and the adapters barrel (spec §11.2, §9; needs 6; one PR, branch kilo/cut-messaging-adapters)
-Decided, do not ask again:
-- **Messaging:** spec §11.2 settles it. Cut every messaging app and the team-chat bridge (not mounted, not imported). Keep only `messaging/status`, which returns "none". Sticks talk to the user through the Sticks app and the onboarding chat only. Edit `apps/api/src/app.ts`, the router and the bridge directly (patch in `patches/`). Keep the routing test green: nothing in `contracts/used-procedures.txt` may 404.
-- **Adapters barrel:** stop importing `@rakazo/adapters` as one barrel. In `app.ts`, import each provider we use from its own module path, and build only those. Providers we use: Postgres, the model and speech gateway (task 13), the in-container computer and sandbox (tasks 15-16), and the storage the engine already needs. Everything else is not imported. If a cut provider is still referenced, guard it so it is never constructed.
-- Re-run the Measurements job and put the new idle RSS [measured] in the PR, beside 635.9 MB [measured] (#17, run 43731318899; that run started the engine under tsx, so it likely overstates). Measure the built output, not tsx. Target 150 MB. If it is still above 300 MB, list the five largest modules loaded at idle (from a heap or require trace in CI) and stop there.
+### Task 6b: split into three PRs, in this order (decided; do not ask again)
+Do each as its own draft PR. After each one, record the idle RSS [measured] from CI in the PR. If after any step RSS is at or under 150 MB, mark the remaining 6b steps "skipped, target met" and move to task 7.
+
+#### Task 6b-1: measure the built engine (needs 6; branch kilo/measure-built)
+- In `scripts/measure_engine.py`, bundle the engine entry with esbuild (already in upstream's dev dependencies; if not, use the version upstream's lockfile has) into one file, with workspace packages bundled and node_modules external. Run it with plain `node`, not tsx.
+- Report both numbers in the summary: tsx RSS and built RSS, [measured].
+- Change only the measure script and its test.
+
+#### Task 6b-2: cut messaging (needs 6b-1; branch kilo/cut-messaging)
+- Spec §11.2: messaging apps and the team-chat bridge go. `messaging/status` stays and answers "none".
+- One patch (`patches/0004-...`) touching: app.ts, the router deps, `routes/messaging.ts`, the team-chat judge and inbound paths, the thread-send path, and the account-import hooks. Where code needs a messaging object, pass a no-op object that does nothing and reports "none"; that keeps type changes small.
+- CI typecheck is your compiler: push, read the tsc errors with `gh run view --log-failed`, fix, push again. Several CI rounds are expected and fine.
+
+#### Task 6b-3: lazy providers in the adapters barrel (needs 6b-2; branch kilo/lazy-adapters)
+- Do NOT rewrite the 73 importers. Patch only `@rakazo/adapters`' barrel index: for the providers Sticks does not use at idle (APNs, Expo push, Stripe, mail, and any other large SDK the RSS shows), replace the eager re-export with a small wrapper that imports the SDK with `await import()` the first time it is used. Exported names and types stay the same, so importers still compile.
+- One PR. If more is needed after measuring, open one more PR for the next provider group.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
