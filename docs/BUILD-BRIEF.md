@@ -41,6 +41,7 @@ This file is the whole brief. Read it on `main`. The owner keeps it current as P
 ## How a session runs (owner, 11-15; this overrides any older "stop" or "report" rule)
 - Work through **every** task whose needs are already merged on `main`, in the order below. One draft PR per task, each branched from the latest `main`. Never stack.
 - **Clone upstream once.** Keep one clone of v0.11.0 in a fixed folder (for example `~/sticks-upstream`), reused by every task and every session. Before cloning, check if it exists; if it does, `git -C <folder> checkout -- . && git -C <folder> clean -fd` to reset it instead of cloning again. Never clone per task. Delete it only when all tasks are DONE.
+- **A blocked task never stops the session.** If a task is BLOCKED, write why in the report and go straight on to every other task whose needs are merged. Only stop when no such task is left. Today that means 7, 9, 13, 15 and 20 can all start now, alongside 6b-3.
 - Do not wait for CI. Push, open the PR, and go straight to the next task. Never start a background monitor, watcher or sleep loop.
 - Before you report, read each PR's checks once (`gh pr checks <n>`). Fix any red ones, push, and move on.
 - **Reports go in a report PR, not in chat.** Keep one docs-only draft PR to `main` (branch `rokct/report-<date>-<n>`) that adds `docs/reports/<date>-<n>.md`. After each step PR, append one short section: task, PR link, what it does, CI result, claims to verify, anything BLOCKED or decided. If the previous report PR is merged, open a new one (new file, new branch from `main`); never edit a merged report.
@@ -55,7 +56,7 @@ After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is alread
 So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a chain, so open only the first unmerged one.
 
 
-Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. 6b-2 merged as #23 (idle RSS [measured] 397.3 MB built, 620.2 MB tsx, run 43736449751); 19 merged as #24. Next: 6b-3; 7, 9, 13, 15, 20 can run alongside.
+Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. 6b-2 merged as #23 (idle RSS [measured] 397.3 MB built, 620.2 MB tsx, run 43736449751); 19 merged as #24. Next: 6b-3 (measurement only), and 7, 9, 13, 15, 20 alongside it.
 **First, before new work:** update the open report PR #25 so it matches: 6b-2 CI green with those numbers; task 19 CI green; task 13 decided (see task 13), not built yet; drop open question 1 (answered).
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
@@ -198,9 +199,9 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - One patch (`patches/0004-...`) touching: app.ts, the router deps, `routes/messaging.ts`, the team-chat judge and inbound paths, the thread-send path, and the account-import hooks. Where code needs a messaging object, pass a no-op object that does nothing and reports "none"; that keeps type changes small.
 - CI typecheck is your compiler: push, read the tsc errors with `gh run view --log-failed`, fix, push again. Several CI rounds are expected and fine.
 
-#### Task 6b-3: lazy providers in the adapters barrel (needs 6b-2; branch rokct/lazy-adapters)
-- Do NOT rewrite the 73 importers. Patch only `@rakazo/adapters`' barrel index: for the providers Sticks does not use at idle (APNs, Expo push, Stripe, mail, and any other large SDK the RSS shows), replace the eager re-export with a small wrapper that imports the SDK with `await import()` the first time it is used. Exported names and types stay the same, so importers still compile.
-- One PR. If more is needed after measuring, open one more PR for the next provider group.
+#### Task 6b-3: find what uses the memory, in CI (decided 11-15; needs 6b-2; branch rokct/memory-profile)
+- Measurement only, no barrel changes. In `scripts/measure_engine.py`, for the built run, also start node with `--heap-prof` (or take one heap snapshot after the 10 s settle) and add a table to the job summary: the 15 largest packages by retained size at idle (group by `node_modules/<package>`), [measured].
+- That is all. Changing the barrel waits until the owner's thread reads that table and writes the next step here. Not your decision.
 
 ### Task 7: the memory job driver as a supported mode, with the boot pass (spec §7.6 "Boot pass", §11.4; needs 5)
 - On every start, before serving, run one pass that recovers:
