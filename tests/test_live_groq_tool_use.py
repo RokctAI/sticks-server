@@ -22,7 +22,7 @@ KEY = os.environ.get("GROQ_API_KEY", "").strip()
 # Groq sits behind Cloudflare, which answers 403 (error 1010) to Python's default User-Agent.
 USER_AGENT = "sticks-live-check/1.0"
 # How many chat models the tool-call check runs on (largest context window first).
-TOOL_CHECK_MODELS = 3
+TOOL_CHECK_MODELS = 10
 # Models that are not chat models (speech, guards, embeddings, text-to-speech).
 NOT_CHAT = re.compile(r"whisper|orpheus|guard|safeguard|embed|tts|speech|vision", re.IGNORECASE)
 
@@ -41,7 +41,11 @@ TOOL = {
 }
 
 
+LAST_HEADERS: dict[str, str] = {}
+
+
 def _request(path: str, payload: dict | None = None) -> dict:
+    global LAST_HEADERS
     request = urllib.request.Request(
         f"{BASE}{path}",
         data=None if payload is None else json.dumps(payload).encode("utf-8"),
@@ -54,6 +58,8 @@ def _request(path: str, payload: dict | None = None) -> dict:
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
+            # Groq reports the key's rate limits in the response headers (tokens per minute, requests per minute).
+            LAST_HEADERS = {k.lower(): v for k, v in response.headers.items()}
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         # The body can echo the request; report the status and the start of the body only (never the key).
@@ -114,7 +120,12 @@ class GroqToolUse(unittest.TestCase):
                 except AssertionError as error:
                     print(f"RESULT {model}: FAIL ({error})")
                     raise
-                print(f"RESULT {model}: PASS (tool call get_weather {arguments})")
+                print(
+                    f"RESULT {model}: PASS (tool call get_weather {arguments}); "
+                    f"limit_tokens={LAST_HEADERS.get('x-ratelimit-limit-tokens')} "
+                    f"limit_requests={LAST_HEADERS.get('x-ratelimit-limit-requests')} "
+                    f"remaining_tokens={LAST_HEADERS.get('x-ratelimit-remaining-tokens')}"
+                )
 
 
 if __name__ == "__main__":
