@@ -61,5 +61,48 @@ class Bundler(unittest.TestCase):
         self.assertEqual(Path(m.BUNDLE_OUT).parent.parts[:-1], Path(m.ENGINE_ENTRY).parent.parts[:-1])
 
 
+class PackageOfFrame(unittest.TestCase):
+    def test_unscoped_and_scoped_packages_under_node_modules(self):
+        self.assertEqual(m.package_of("file:///w/node_modules/.pnpm/hono@4/node_modules/hono/dist/index.js"), "hono")
+        self.assertEqual(m.package_of("/w/node_modules/@prisma/client/runtime/library.js"), "@prisma/client")
+
+    def test_the_last_node_modules_segment_wins(self):
+        url = "/w/node_modules/.pnpm/a@1/node_modules/a/node_modules/b/index.js"
+        self.assertEqual(m.package_of(url), "b")
+
+    def test_the_bundled_engine_file_is_one_label(self):
+        self.assertEqual(m.package_of("file:///w/apps/sticks-engine/dist/sticks-engine.mjs"), m.BUNDLED_LABEL)
+
+    def test_no_url_is_node_itself_and_other_paths_are_other(self):
+        self.assertEqual(m.package_of(""), "node internals")
+        self.assertEqual(m.package_of("/w/packages/x/src/y.ts"), "other")
+
+
+class AggregateProfile(unittest.TestCase):
+    def test_sums_self_size_per_package_over_the_whole_tree(self):
+        root = {
+            "callFrame": {"url": "", "functionName": "(root)"},
+            "selfSize": 0,
+            "children": [
+                {"callFrame": {"url": "file:///w/node_modules/hono/i.js"}, "selfSize": 100,
+                 "children": [{"callFrame": {"url": "file:///w/node_modules/hono/j.js"}, "selfSize": 50,
+                               "children": []}]},
+                {"callFrame": {"url": "file:///w/node_modules/zod/z.js"}, "selfSize": 30, "children": []},
+            ],
+        }
+        totals, total = m.aggregate_profile(root)
+        self.assertEqual(totals["hono"], 150)
+        self.assertEqual(totals["zod"], 30)
+        self.assertEqual(total, 180)
+
+    def test_table_ranks_largest_first_and_caps_at_fifteen(self):
+        totals = {f"pkg{i}": i * 1024 * 1024 for i in range(1, 30)}
+        text = m.format_profile_table(totals, sum(totals.values()))
+        rows = [line for line in text.splitlines() if line.startswith("| ") and "pkg" in line]
+        self.assertEqual(len(rows), m.PROFILE_TOP)
+        self.assertIn("| 1 | pkg29 |", rows[0])
+        self.assertIn("allocation-site attribution", text)
+
+
 if __name__ == "__main__":
     unittest.main()

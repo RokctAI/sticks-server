@@ -11,7 +11,9 @@ Steps:
      upstream's testkit (scripted model, fake sandbox): first from source under tsx, then the bundle
      under plain node. For each run: wait for GET /health, let it settle, then sum VmRSS over the
      engine's process tree (Linux /proc);
-  5. write a small markdown table with both numbers to --summary (CI passes $GITHUB_STEP_SUMMARY).
+  5. run the built bundle once more with --heap-prof, outside the RSS runs, and add the 15 largest
+     packages at idle (a sampling heap profile, grouped by the package of the allocating frame);
+  6. write the markdown tables to --summary (CI passes $GITHUB_STEP_SUMMARY).
 
 The numbers are only meaningful on the CI runner. This script is run by CI's Measurements job.
 
@@ -155,6 +157,67 @@ def tree_rss_kb(root: int) -> tuple[int, int]:
         except OSError:
             continue
     return total, len(pids)
+
+
+PROFILE_TOP = 15
+BUNDLED_LABEL = "engine + workspace packages (bundled)"
+
+
+def package_of(url: str) -> str:
+    """The package that owns a profile frame, from its script URL.
+
+    Anything under node_modules is grouped by its package (scoped names keep both parts). The bundled
+    engine file holds the engine and every workspace package. A frame with no URL is node's own code.
+    """
+    if not url:
+        return "node internals"
+    path = url.replace("\\", "/")
+    if path.startswith("file://"):
+        path = path[len("file://"):]
+    if path.endswith("/" + Path(BUNDLE_OUT).name):
+        return BUNDLED_LABEL
+    if "/node_modules/" in path:
+        parts = path.rsplit("/node_modules/", 1)[1].split("/")
+        if parts[0].startswith("@") and len(parts) > 1:
+            return f"{parts[0]}/{parts[1]}"
+        return parts[0]
+    return "other"
+
+
+def aggregate_profile(root: dict) -> tuple[dict[str, int], int]:
+    """Bytes per package across a sampling heap profile tree (selfSize of every node), and the total."""
+    totals: dict[str, int] = {}
+    total = 0
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        size = int(node.get("selfSize", 0))
+        package = package_of(node.get("callFrame", {}).get("url", ""))
+        totals[package] = totals.get(package, 0) + size
+        total += size
+        stack.extend(node.get("children", []))
+    return totals, total
+
+
+def format_profile_table(totals: dict[str, int], total: int) -> str:
+    """The job-summary table of the largest packages at idle."""
+    ranked = sorted(totals.items(), key=lambda item: item[1], reverse=True)[:PROFILE_TOP]
+    lines = [
+        "## Engine memory by package at idle (scripts/measure_engine.py, sampling heap profile)",
+        "",
+        "Live allocations at shutdown, grouped by the package of the frame that allocated them. This is "
+        "allocation-site attribution from the sampling profiler, not dominator-tree retained size.",
+        "",
+        "| Rank | Package | Live bytes | Share of sampled |",
+        "|---|---|---|---|",
+    ]
+    for rank, (package, size) in enumerate(ranked, start=1):
+        share = (size / total * 100) if total else 0.0
+        lines.append(f"| {rank} | {package} | {size / (1024 * 1024):.1f} MB | {share:.1f}% |")
+    lines.append("")
+    lines.append(f"Total sampled: {total / (1024 * 1024):.1f} MB. Taken from the built run, after the same "
+                 f"{SETTLE_SECONDS} s settle, with a separate run so the profiler does not change the RSS numbers.")
+    return "\n".join(lines) + "\n"
 
 
 # ---- steps ----------------------------------------------------------------------------------
@@ -318,6 +381,21 @@ def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: 
                     proc.kill()
 
 
+def profile_run(checkout: Path, node: str, db_port: str, tmp: Path) -> str:
+    """One more built run with --heap-prof; node writes the profile when it exits. Returns the table."""
+    prof_dir = tmp / "heap-prof"
+    prof_dir.mkdir(parents=True, exist_ok=True)
+    measure_run("profile (built, heap-prof)", [node, "--heap-prof", f"--heap-prof-dir={prof_dir}", BUNDLE_OUT],
+                checkout, db_port, tmp)
+    profiles = sorted(prof_dir.glob("*.heapprofile"), key=lambda path: path.stat().st_mtime)
+    if not profiles:
+        return ("## Engine memory by package at idle (scripts/measure_engine.py)\n\n"
+                "No heap profile was written: the engine did not exit through its shutdown path within 20 s.\n")
+    root = json.loads(profiles[-1].read_text(encoding="utf-8"))["head"]
+    totals, total = aggregate_profile(root)
+    return format_profile_table(totals, total)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True, help="folder for the build (missing or empty)")
@@ -350,6 +428,7 @@ def main() -> int:
         try:
             tsx_rss, tsx_count = measure_run("tsx (source)", [str(tsx), ENGINE_ENTRY], checkout, db_port, tmp)
             built_rss, built_count = measure_run("built (plain node)", [node, BUNDLE_OUT], checkout, db_port, tmp)
+            profile_table = profile_run(checkout, node, db_port, tmp)
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return EXIT_NO_ENGINE
@@ -358,8 +437,8 @@ def main() -> int:
             ("built (esbuild bundle, plain node)", built_rss, built_count),
         ])
         with open(args.summary, "a", encoding="utf-8", newline="\n") as summary:
-            summary.write(table)
-        print(table)
+            summary.write(table + "\n" + profile_table)
+        print(table + "\n" + profile_table)
         return EXIT_OK
     finally:
         if cid:
