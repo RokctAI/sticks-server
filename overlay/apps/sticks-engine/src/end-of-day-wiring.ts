@@ -2,12 +2,7 @@
 // from the environment: STICKS_END_OF_DAY ("HH:MM", the tenant's local time) and STICKS_TZ_OFFSET_MINUTES
 // (the zone's offset from UTC, east positive, default 0). Unset STICKS_END_OF_DAY means no daily job.
 import { dayEndingAt, nextEndOfDayAt, runEndOfDay, type EndOfDayDeps, type EndOfDayResult } from "./end-of-day.js";
-import {
-  activeChatsForDay,
-  endOfDayDeps,
-  notConnectedEngram,
-  type ThreadCursor,
-} from "./end-of-day-adapters.js";
+import { endOfDayDeps, notConnectedEngram, type ThreadCursor } from "./end-of-day-adapters.js";
 
 /** The zone offset from the environment (STICKS_TZ_OFFSET_MINUTES), validated. Default 0. */
 export function tzOffsetFromEnv(env: NodeJS.ProcessEnv): number {
@@ -19,34 +14,23 @@ export function tzOffsetFromEnv(env: NodeJS.ProcessEnv): number {
   return offset;
 }
 
-/** The Prisma calls the end-of-day steps use. */
-export type EndOfDayPrisma = Parameters<typeof activeChatsForDay>[0] & {
-  thread: {
-    findUniqueOrThrow(args: {
-      where: { id: string };
-      select: { nextMessageSeq: true; historyCompactedUpToSeq: true; historyCompactionSummary: true };
-    }): Promise<ThreadCursor>;
-  };
-};
-
 /**
- * The engine's end-of-day deps: real chat listing and cursor reads; the summariser needs upstream's
- * compaction runtime, which the engine does not expose yet, so it fails with a clear message; the Engram
- * write is not connected (Pulsar side).
+ * The engine's end-of-day deps. The chat listing and cursor reads come from the engine (its typed Prisma
+ * client). The summariser needs upstream's compaction runtime, which the engine does not expose yet, so it
+ * fails with a clear message; the Engram write is not connected (Pulsar side).
  */
-export function engineEndOfDayDeps(prisma: EndOfDayPrisma, offsetMinutes: number): EndOfDayDeps {
+export function engineEndOfDayDeps(options: {
+  activeChats: (day: string) => Promise<{ id: string }[]>;
+  readThread: (threadId: string) => Promise<ThreadCursor>;
+}): EndOfDayDeps {
   return endOfDayDeps({
-    activeChats: (day) => activeChatsForDay(prisma, day, offsetMinutes),
+    activeChats: options.activeChats,
     compact: async () => {
       throw new Error(
         "end of day: upstream's summariser (compactHistory) needs the agent runtime, which the engine does not expose yet",
       );
     },
-    readThread: (threadId) =>
-      prisma.thread.findUniqueOrThrow({
-        where: { id: threadId },
-        select: { nextMessageSeq: true, historyCompactedUpToSeq: true, historyCompactionSummary: true },
-      }),
+    readThread: options.readThread,
     engram: notConnectedEngram(),
   });
 }

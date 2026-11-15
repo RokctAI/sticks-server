@@ -62,29 +62,19 @@ export function notConnectedEngram(): EngramTransport {
   };
 }
 
-/** The chats with at least one message on the day. Bot chats only (a thread with a bot). */
-export async function activeChatsForDay(
-  prisma: {
-    thread: {
-      findMany(args: {
-        where: unknown;
-        select: { id: true };
-        take: number;
-      }): Promise<{ id: string }[]>;
-    };
-  },
+/**
+ * The where clause of the active-chat query: bot threads with at least one message inside the local day.
+ * The engine runs it with its own typed client (a structural Prisma type does not match the real client).
+ */
+export function activeChatsWhere(
   day: string,
   offsetMinutes: number,
-): Promise<{ id: string }[]> {
+): { botId: { not: null }; messages: { some: { createdAt: { gte: Date; lt: Date } } } } {
   const { start, end } = dayBoundsUtc(day, offsetMinutes);
-  return prisma.thread.findMany({
-    where: {
-      botId: { not: null },
-      messages: { some: { createdAt: { gte: start, lt: end } } },
-    },
-    select: { id: true },
-    take: 500,
-  });
+  return {
+    botId: { not: null },
+    messages: { some: { createdAt: { gte: start, lt: end } } },
+  };
 }
 
 /** Builds the EndOfDayDeps from the pieces above. `compact` and `readThread` come from the engine. */

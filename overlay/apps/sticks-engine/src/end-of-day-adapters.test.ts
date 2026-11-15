@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeChatsForDay,
+  activeChatsWhere,
   compactThroughEnd,
   dayBoundsUtc,
   endOfDayDeps,
@@ -98,20 +98,9 @@ describe("the Engram write and the assembled deps (brief task 18)", () => {
   });
 });
 
-describe("activeChatsForDay: the query's day bounds", () => {
-  it("asks for bot threads with a message inside the local day, in UTC bounds", async () => {
-    let seen: unknown = null;
-    const prisma = {
-      thread: {
-        findMany: async (args: { where: unknown }) => {
-          seen = args.where;
-          return [{ id: "t1" }];
-        },
-      },
-    };
-    const chats = await activeChatsForDay(prisma, "2026-11-15", 120);
-    expect(chats).toEqual([{ id: "t1" }]);
-    expect(seen).toEqual({
+describe("activeChatsWhere: the query's day bounds", () => {
+  it("asks for bot threads with a message inside the local day, in UTC bounds", () => {
+    expect(activeChatsWhere("2026-11-15", 120)).toEqual({
       botId: { not: null },
       messages: {
         some: {
