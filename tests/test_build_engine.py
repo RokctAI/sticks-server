@@ -63,9 +63,13 @@ class OverlayRules(unittest.TestCase):
             "apps/sticks-engine/src/b.test.tsx",
         ])
 
-    def test_checked_in_overlay_has_no_code_yet(self):
-        # Only the documentation is in overlay/ today; a stray file there would be copied into every build.
-        self.assertEqual(b.overlay_files(ROOT / "overlay"), [])
+    def test_checked_in_overlay_code_lives_under_apps(self):
+        # Every file in overlay/ is copied into the engine build. Code must sit under apps/, so a stray
+        # file at the top level (or a root package.json that would change the lockfile) is caught here.
+        files = b.overlay_files(ROOT / "overlay")
+        self.assertTrue(files, "overlay/ should hold the engine app")
+        stray = [f for f in files if not f.startswith("apps/")]
+        self.assertEqual(stray, [])
 
 
 class EngineAndToolVersions(unittest.TestCase):
