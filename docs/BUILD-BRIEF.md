@@ -5,17 +5,21 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
 ## DO THIS NOW (read first; overrides everything below)
-Merged since the last list: 7 (#32), 9 verifier only (#33, sign-in not wired yet), 20 (#36), 6b-4 (#37). Task 13 is #34 (merging). The 6b chain is STOPPED: idle is 389.8 MB built, and the largest heap item is node builtins (56%), which no package change touches.
-Your work list for this session, in order. One draft PR per line (lines 1 and 2 push to existing PRs):
-1. **Fix #35 (task 15), push to its branch.** Four defects from review, each with a test: (a) `write` must refuse a symlink target (realpath it if it exists, or open with O_NOFOLLOW); (b) `list` must run the inside-folder check on its target; (c) `write` must check the deepest existing ancestor with realpath BEFORE mkdir; (d) on timeout, kill the group, then resolve with `timedOut: true` after a short grace and destroy the pipes, without waiting for "close" (test with `setsid sleep 6 &`). Also set `process.umask(0o177)` around listen, and make the doc comment say "owner only".
-2. **Update report #38:** 6b-4 = 389.8 MB built, 633.1 MB tsx, run 43740661607; the largest heap item is node builtins at 56%; 6b chain stopped. Then keep appending this session's work to it.
-3. Task 8 (idle and next-wake endpoint; 7 is merged).
-4. Task 13b (new): wire the model catalogue to the gateway (the base URL and key per provider, as task 13 says). Change the start-up check to refuse ANY env var ending in `_API_KEY`, not a fixed list. Needs #34 merged; if it is not merged yet, write BLOCKED and go on.
-5. Task 9b (new): mount the Pulsar-token verifier from #33 as the sign-in route, and turn off password, passkey and SSO sign-in. If the sender kind and id, the transport header or the Guest role are not written in docs/pulsar-engine-interface.md as settled by the owner, write BLOCKED and do not guess. Do not unmount any sign-in route until a test proves the token route signs a user in.
-6. Task 21 (plugin builder skill).
-7. Task 22 (GitHub plugin).
-8. Task 18 (end-of-day memory into Engram; needs 13b).
-After each PR is pushed, go straight to the next line. Do not check CI between them. Each line ends as a PR or as `BLOCKED: <reason>` in the report. Only then reply, in two lines.
+Merged: 13 (#34), 15 (#35). #38 report, #40 (8), #41 (22), #42 (21) are with the owner. The upstream clone is `~/sticks-upstream` (v0.11.0). Reuse it; never clone again.
+These answers SETTLE the earlier BLOCKED items (owner's decision, 11-15). Write them into docs/pulsar-engine-interface.md as settled:
+- Token sender: `sender.kind` = `"site"`, `sender.id` = the tenant's site host name (env `STICKS_TENANT_SITE`).
+- Transport: `Authorization: Bearer <base64url of the JSON envelope>`.
+- `Sticks Guest`: read-only chat with no tools, no runs and no memory writes.
+- Model catalogue (13b): `pi-ai` is a published npm package. Find its exact name and version in `~/sticks-upstream/pnpm-lock.yaml` and read its `.d.ts` files at `https://unpkg.com/<name>@<version>/` (reading only, no install). Providers other than anthropic and openai use their own documented key header.
+- Plugins: drafts are stored in a new engine table `plugin_draft`. The admin is the `Sticks Admin` role. MCP is not supported in v1 (leave it out). Seed the GitHub plugin from our boot pass (task 7) if it is missing.
+- Idle (8): count open streams and live scripts, push on every change, and leave the sleeping notice and freeze fallback to the runner (not here).
+- Cgroup caps (15): the runner's job; not here.
+Work list, one draft PR per line, no CI checks between:
+1. Task 9b with the answers above (the doc change goes in this PR).
+2. Task 13b, including the startup refusal of ANY `*_API_KEY` variable.
+3. Push the plugin and idle answers to #42, #41 and #40 (existing branches).
+4. Task 18 (after 13b's PR is up).
+5. Append the results to report #38. Then reply in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
