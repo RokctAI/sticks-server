@@ -76,6 +76,24 @@ def overlay_typecheck_projects(files: list[str]) -> list[str]:
     return [f for f in files if f.startswith("apps/") and f.endswith("/tsconfig.json")]
 
 
+def overlay_type_errors(output: str, project_dir: str) -> list[str]:
+    """The tsc lines that are ours to fix: errors in files under project_dir, and config-level errors.
+
+    Our overlay imports upstream packages by relative path, and tsc then reports errors inside those
+    packages (their own jsx and path settings are not ours). Upstream's `pnpm run check` already covers
+    them, so those lines are left out here. Lines are `path(line,col): error TSnnnn: ...` with pretty off.
+    """
+    prefix = project_dir.replace("\\", "/").rstrip("/") + "/"
+    out: list[str] = []
+    for line in output.splitlines():
+        if "error TS" not in line:
+            continue
+        m = re.match(r"^(.+?)\(\d+,\d+\): error TS", line)
+        if m is None or m.group(1).replace("\\", "/").startswith(prefix):
+            out.append(line)
+    return out
+
+
 def overlay_test_files(files: list[str]) -> list[str]:
     return [f for f in files if any(Path(f).match(g) for g in TEST_GLOBS)]
 
@@ -202,10 +220,14 @@ def main() -> int:
 
     for project in overlay_typecheck_projects(overlay_list):
         step(f"overlay typecheck: tsc --noEmit -p {project}")
-        r = up.run([pnpm, "exec", "tsc", "--noEmit", "-p", project], cwd=checkout, check=False)
-        if r.returncode != 0:
-            print(r.stdout[-3000:], r.stderr[-3000:], sep="\n", file=sys.stderr)
+        r = up.run([pnpm, "exec", "tsc", "--noEmit", "--pretty", "false", "-p", project], cwd=checkout, check=False)
+        ours = overlay_type_errors(r.stdout + "\n" + r.stderr, str(Path(project).parent))
+        if ours:
+            print("type errors in our overlay code:", file=sys.stderr)
+            print("\n".join(ours[:200]), file=sys.stderr)
             return EXIT_BROKEN
+        if r.returncode != 0:
+            print("tsc reports errors only inside upstream packages our code imports; upstream's check covers them")
 
     tests = overlay_test_files(overlay_list)
     if not tests:
