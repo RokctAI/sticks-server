@@ -140,6 +140,54 @@ class SyncTests(unittest.TestCase):
         self.assertIn("Mine.", out)
 
 
+class DbRoleTests(unittest.TestCase):
+    CLEAN = "-- add a column\nALTER TABLE \"User\" ADD COLUMN \"nick\" TEXT;\n"
+    ROLE = 'CREATE ROLE "rakazo_app" NOLOGIN;\n'
+    GRANT = 'GRANT SELECT, INSERT ON TABLE "Bot" TO "rakazo_app";\n'
+    GRANT_MULTI = 'GRANT USAGE\n  ON SCHEMA public\n  TO someone_else;\n'
+    MENTION = "-- rakazo_app must exist first\nSELECT 1;\n"
+    REVOKE = 'REVOKE ALL ON TABLE "Bot" FROM PUBLIC;\n'
+
+    def test_clean_migration_is_not_flagged(self):
+        self.assertEqual(s.risky_statements(self.CLEAN), [])
+        self.assertEqual(s.risky_statements(self.REVOKE), [])
+
+    def test_create_role_grant_and_mention_are_flagged(self):
+        self.assertEqual(len(s.risky_statements(self.ROLE)), 1)
+        self.assertIn("rakazo_app", s.risky_statements(self.GRANT)[0])
+        self.assertEqual(len(s.risky_statements(self.GRANT_MULTI)), 1)
+        self.assertEqual(len(s.risky_statements(self.MENTION)), 1)
+
+    def test_role_report_lists_only_risky_migrations_in_order(self):
+        added = {
+            "packages/db/prisma/migrations/2026_b/migration.sql": self.GRANT,
+            "packages/db/prisma/migrations/2026_a/migration.sql": self.CLEAN + self.ROLE,
+            "packages/db/prisma/migrations/2026_c/migration.sql": self.CLEAN,
+        }
+        hits = s.role_report(added)
+        self.assertEqual([p for p, _ in hits], [
+            "packages/db/prisma/migrations/2026_a/migration.sql",
+            "packages/db/prisma/migrations/2026_b/migration.sql",
+        ])
+        text = s.format_role_report(hits)
+        self.assertIn("2026_a/migration.sql", text)
+        self.assertNotIn("2026_c", text)
+
+    def test_empty_report_says_nothing_found(self):
+        self.assertIn("No migration added", s.format_role_report(s.role_report({"m.sql": self.CLEAN})))
+
+    def test_long_statement_is_shortened_and_capped(self):
+        many = {"m00.sql": self.GRANT * 12}
+        text = s.format_role_report(s.role_report(many))
+        self.assertIn("...and 2 more", text)
+        self.assertLess(len(s.risky_statements("GRANT " + "x " * 300 + "TO y;")[0]), 201)
+
+    def test_report_template_has_the_section(self):
+        tpl = (Path(__file__).resolve().parent.parent / "templates" / "report.md").read_text()
+        self.assertIn("## Database roles: CHECK BY HAND", tpl)
+        self.assertIn("$db_roles", tpl)
+
+
 def _snap(**kw):
     base = dict(run_status="completed", run_ended_at=100.0, last_message_text="Done with batch 1.",
                 last_message_from_owner=False, last_message_at=100.0,

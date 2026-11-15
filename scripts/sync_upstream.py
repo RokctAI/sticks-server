@@ -305,6 +305,58 @@ def compare_versions(checkout: Path, old_tag: str, new_tag: str) -> str:
         return f"(comparison failed: {exc})"
 
 
+# Database roles (spec 8.2, item 6). Upstream's migrations create a server-wide role and grant to it;
+# on our shared Postgres a new one of these needs a human look before the pin moves.
+MIGRATIONS_DIR = "packages/db/prisma/migrations/"
+ROLE_PATTERNS = (
+    re.compile(r"\bCREATE\s+ROLE\b", re.I),
+    re.compile(r"\bGRANT\b.*?\bTO\b", re.I | re.S),
+    re.compile(r"rakazo_app", re.I),
+)
+
+
+def risky_statements(sql: str) -> list[str]:
+    """SQL statements (split on ';') that create a role, grant to one, or mention rakazo_app."""
+    out: list[str] = []
+    for stmt in sql.split(";"):
+        if any(p.search(stmt) for p in ROLE_PATTERNS):
+            out.append(" ".join(stmt.split())[:200])
+    return out
+
+
+def role_report(added: dict[str, str]) -> list[tuple[str, list[str]]]:
+    """added: migration path -> SQL text, for migrations added in the range. Returns the risky ones."""
+    hits: list[tuple[str, list[str]]] = []
+    for path in sorted(added):
+        found = risky_statements(added[path])
+        if found:
+            hits.append((path, found))
+    return hits
+
+
+def format_role_report(hits: list[tuple[str, list[str]]]) -> str:
+    if not hits:
+        return "No migration added in this range creates a role, grants to one, or mentions `rakazo_app`."
+    lines = ["Added migrations that need a human look before the pin moves (spec 8.2, item 6):"]
+    for path, stmts in hits:
+        lines.append(f"\n- `{path}`")
+        lines.extend(f"  - `{s}`" for s in stmts[:10])
+        if len(stmts) > 10:
+            lines.append(f"  - ...and {len(stmts) - 10} more")
+    return "\n".join(lines)
+
+
+def added_migrations(checkout: Path, old_tag: str, new_tag: str) -> dict[str, str]:
+    """SQL of every migration added between the two tags (both are in the shallow checkout)."""
+    f = run(["git", "fetch", "--depth=1", "origin", f"refs/tags/{old_tag}:refs/tags/{old_tag}"],
+            cwd=checkout, check=False)
+    if f.returncode != 0:
+        raise RuntimeError(f"could not fetch the pinned tag {old_tag}")
+    names = run(["git", "diff", "--name-only", "--diff-filter=A", old_tag, new_tag, "--", MIGRATIONS_DIR],
+                cwd=checkout).stdout.splitlines()
+    return {n: run(["git", "show", f"{new_tag}:{n}"], cwd=checkout).stdout for n in names if n.endswith(".sql")}
+
+
 def image_digest(image: str, tag: str) -> str:
     """Best effort: manifest digest of an image tag on ghcr.io (anonymous read). '' on any failure."""
     try:
@@ -337,7 +389,7 @@ def write_pin(path: Path, pin: dict[str, str], tag: str, commit: str) -> None:
         raise RuntimeError(f"no image digest found for {tag} ({', '.join(missing)}); not writing the pin")
     header = [l for l in path.read_text().splitlines() if l.startswith("#")]
     body = [f"{k}={v}" for k, v in pin.items()]
-    path.write_text("\n".join(header + body) + "\n")
+    path.write_text("\n".join(header + body) + "\n", newline="\n")  # LF always, also on Windows
 
 
 # ---- main -----------------------------------------------------------------------------------
@@ -406,6 +458,11 @@ def main() -> int:
 
         changes = compare_versions(checkout, pinned, new_tag)
 
+        try:
+            db_roles = format_role_report(role_report(added_migrations(checkout, pinned, new_tag)))
+        except Exception as exc:  # reported, never changes the exit code
+            db_roles = f"(could not read the migrations: {exc}). Check `{MIGRATIONS_DIR}` by hand."
+
         cl = checkout / "CHANGELOG.md"
         changelog = changelog_since(cl.read_text(), pinned, new_tag) if cl.is_file() else "(no CHANGELOG.md)"
 
@@ -427,7 +484,7 @@ def main() -> int:
             status, result = "CONTRACT BREAK", f"`{new_tag}` is newer but the app calls something that no longer exists. The pin does NOT move."
             steps = "Update the Dart client and used-procedures.txt in the same wave, or skip this tag."
         values.update(status=status, result=result, patches=patches_txt, contract=contract_txt,
-                      changelog=changelog, changes=changes, next_steps=steps)
+                      changelog=changelog, changes=changes, db_roles=db_roles, next_steps=steps)
         emit(values, args.report)
         return code
     finally:
@@ -435,6 +492,7 @@ def main() -> int:
 
 
 def emit(values: dict[str, str], report: str | None) -> None:
+    values.setdefault("db_roles", "-")
     text = Template((ROOT / "templates" / "report.md").read_text()).safe_substitute(values)
     if report:
         Path(report).write_text(text)
