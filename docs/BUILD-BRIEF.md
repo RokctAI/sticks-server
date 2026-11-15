@@ -55,7 +55,8 @@ After 6b-1, 6b-2 and 6b-3 (in order), these groups only need work that is alread
 So one session can open 7, 9, 13, 15, 19 and 20 side by side. The 6b steps are a chain, so open only the first unmerged one.
 
 
-Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. Next: task 6b-2, then 6b-3; 7, 9, 13, 15, 19, 20 can run alongside.
+Status as of 2026-11-15: tasks 1-6 and 5b merged (#7, #8, #10, #11, #12, #14, #17; CI #9). Task 6 merged as #17. 6b-2 merged as #23 (idle RSS [measured] 397.3 MB built, 620.2 MB tsx, run 43736449751); 19 merged as #24. Next: 6b-3; 7, 9, 13, 15, 20 can run alongside.
+**First, before new work:** update the open report PR #25 so it matches: 6b-2 CI green with those numbers; task 19 CI green; task 13 decided (see task 13), not built yet; drop open question 1 (answered).
 The sync work already merged (#7, #8, #11) stays as it is; just add no more.
 
 **Nothing runs on this computer except git and editing files.**
@@ -192,7 +193,7 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Report both numbers in the summary: tsx RSS and built RSS, [measured].
 - Change only the measure script and its test.
 
-#### Task 6b-2: cut messaging (needs 6b-1; branch rokct/cut-messaging)
+#### Task 6b-2: DONE (merged as #23). Cut messaging (needs 6b-1; branch rokct/cut-messaging)
 - Spec §11.2: messaging apps and the team-chat bridge go. `messaging/status` stays and answers "none".
 - One patch (`patches/0004-...`) touching: app.ts, the router deps, `routes/messaging.ts`, the team-chat judge and inbound paths, the thread-send path, and the account-import hooks. Where code needs a messaging object, pass a no-op object that does nothing and reports "none"; that keeps type changes small.
 - CI typecheck is your compiler: push, read the tsc errors with `gh run view --log-failed`, fix, push again. Several CI rounds are expected and fine.
@@ -311,7 +312,7 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - **Pulsar's Engram endpoint is not built yet** (core side). Build against a fake, and write the call in `docs/pulsar-engine-interface.md`.
 - **No outside memory:** the external memory providers are switched off in the Sticks build, so memory never leaves the tenant.
 
-### Task 19: the onboarding bot's harness side (spec §4.8; docs and samples only)
+### Task 19: DONE (merged as #24). The onboarding bot's harness side (spec §4.8; docs and samples only)
 - **Scale (decided):** one onboarding bot serves any number of users at once. Each chat is a separate session; the bot keeps no state in memory between turns (all state in the hub DB). The hub runs as many harness workers as needed behind a load balancer. Real limits are the gateway's provider rate limits and Postgres connections (use a pooler). Write this in the sample docs.
 - **The logic lives in Pulsar's control SDK** (not here). The harness only gets tools and an instruction.
 - **Add `templates/onboarding-bot.md`**, the bot's instruction, from spec §4.8:
