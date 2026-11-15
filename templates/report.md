@@ -19,5 +19,8 @@ $changelog
 ## What changed in upstream, by area (pinned version vs new version)
 $changes
 
+## Database roles: CHECK BY HAND
+$db_roles
+
 ## What to do
 $next_steps
