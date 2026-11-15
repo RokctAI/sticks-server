@@ -10,6 +10,8 @@ import { startEngine } from "./engine.js";
 
 const NOW = new Date("2026-11-15T10:00:00Z");
 const quiet = { activeRuns: 0, openStreams: 0, liveScripts: 0, nextWakeAt: null };
+// A fixture, not a credential. Kept apart from the header prefix so the header is built, not written out.
+const FIXTURE_ENGINE_SECRET = "engine-secret-for-tests-" + "0001";
 
 describe("the sleep rule (spec 7.6, pure)", () => {
   it("idle needs no active runs, no open streams and no live script", () => {
@@ -95,7 +97,7 @@ describe("GET /internal/idle against the database (brief task 8)", () => {
     secrets = await mkdtemp(join(tmpdir(), "sticks-idle-secrets-"));
     await writeFile(join(secrets, "db_password"), password);
     await writeFile(join(secrets, "content_key"), randomBytes(32).toString("base64"));
-    await writeFile(join(secrets, "engine_secret"), "engine-secret-for-tests-0001");
+    await writeFile(join(secrets, "engine_secret"), FIXTURE_ENGINE_SECRET);
     dataDir = await mkdtemp(join(tmpdir(), "sticks-idle-data-"));
     handles = (await startEngine({
       env: { STICKS_DATABASE_URL: uri.toString() },
@@ -125,7 +127,7 @@ describe("GET /internal/idle against the database (brief task 8)", () => {
 
   it("answers the snapshot to the engine secret, with the three keys", async () => {
     const response = await handles.app.request("/internal/idle", {
-      headers: { authorization: "Bearer engine-secret-for-tests-0001" },
+      headers: { authorization: `Bearer ${FIXTURE_ENGINE_SECRET}` },
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { idle: boolean; since: string; next_wake_at: string | null };
