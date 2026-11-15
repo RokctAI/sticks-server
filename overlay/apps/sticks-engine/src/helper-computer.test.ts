@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Server } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AdapterContext, CommandRequest, ComputerRef, ProcessEvent } from "../../../packages/adapter-kit/src/index.ts";
-import { HelperComputerProvider, shellQuote } from "./helper-computer.js";
+import { HelperComputerProvider, helperSandboxFromEnv, shellQuote } from "./helper-computer.js";
 import { startHelper } from "../sandbox/helper.js";
 
 let root: string;
@@ -114,5 +114,26 @@ describe("file operations through the helper (brief task 16)", () => {
   it("a path that leaves the Stick's folder is refused by the helper", async () => {
     await expect(provider.readFile(computer, "../../etc/passwd")).rejects.toThrow();
     await expect(provider.writeFile(computer, { path: "../escape.txt", content: bytes })).rejects.toThrow();
+  });
+});
+describe("selecting the helper computer provider (brief task 16)", () => {
+  it("not selected unless STICKS_COMPUTER=helper", () => {
+    expect(helperSandboxFromEnv({})).toBeUndefined();
+    expect(helperSandboxFromEnv({ STICKS_COMPUTER: "docker" })).toBeUndefined();
+  });
+
+  it("selected with STICKS_COMPUTER=helper, on the default socket path", () => {
+    const selected = helperSandboxFromEnv({ STICKS_COMPUTER: "helper" });
+    expect(selected).toBeInstanceOf(HelperComputerProvider);
+    expect(selected?.describe().capabilities.graphical).toBe(false);
+  });
+
+  it("the socket path can be set", async () => {
+    const selected = helperSandboxFromEnv({ STICKS_COMPUTER: "helper", STICKS_SANDBOX_SOCKET: socketPath });
+    const events: ProcessEvent[] = [];
+    for await (const event of selected!.execute(computer, { argv: ["echo", "via-env"] } as CommandRequest, context)) {
+      events.push(event);
+    }
+    expect(stdoutOf(events)).toBe("via-env\n");
   });
 });

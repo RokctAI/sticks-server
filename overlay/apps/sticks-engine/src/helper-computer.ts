@@ -168,3 +168,13 @@ export class HelperComputerProvider extends DesktopSandboxProvider {
     });
   }
 }
+/**
+ * The helper provider when the engine is configured for it: STICKS_COMPUTER=helper, with the helper's socket in
+ * STICKS_SANDBOX_SOCKET (default /run/sticks/sandbox.sock, the same path the helper listens on). Undefined otherwise.
+ * It is a separate switch from SANDBOX_PROVIDER: upstream rejects unknown SANDBOX_PROVIDER values at startup.
+ */
+export function helperSandboxFromEnv(env: NodeJS.ProcessEnv): HelperComputerProvider | undefined {
+  if ((env.STICKS_COMPUTER ?? "").trim() !== "helper") return undefined;
+  const socket = (env.STICKS_SANDBOX_SOCKET ?? "").trim() || "/run/sticks/sandbox.sock";
+  return new HelperComputerProvider(socket);
+}
