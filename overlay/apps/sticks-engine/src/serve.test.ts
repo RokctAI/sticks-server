@@ -2,7 +2,34 @@ import { once } from "node:events";
 import { request as httpRequest, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClientIpResolver } from "../../api/src/client-ip.js";
-import { type NodeEnv, serveFetch } from "./serve.js";
+import { EventEmitter } from "node:events";
+import type { ServerResponse } from "node:http";
+import { type NodeEnv, serveFetch, waitForDrain } from "./serve.js";
+
+describe("waitForDrain (5b review fix)", () => {
+  it("returns at once when the response is already destroyed (no 'close' will fire again)", async () => {
+    const res = Object.assign(new EventEmitter(), { destroyed: true, writableEnded: false });
+    await expect(waitForDrain(res as unknown as ServerResponse)).resolves.toBeUndefined();
+  });
+
+  it("returns at once when the response has already ended", async () => {
+    const res = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: true });
+    await expect(waitForDrain(res as unknown as ServerResponse)).resolves.toBeUndefined();
+  });
+
+  it("waits for drain on a live response, and resolves on drain", async () => {
+    const res = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false });
+    let resolved = false;
+    const waiting = waitForDrain(res as unknown as ServerResponse).then(() => {
+      resolved = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(resolved).toBe(false);
+    res.emit("drain");
+    await waiting;
+    expect(resolved).toBe(true);
+  });
+});
 
 const servers: Server[] = [];
 afterEach(() => {

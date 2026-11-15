@@ -1,0 +1,151 @@
+diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
+index 74ab91a..380ed8d 100644
+--- a/apps/api/src/app.ts
++++ b/apps/api/src/app.ts
+@@ -123,11 +123,8 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
+ import { Hono } from "hono";
+ import { cors } from "hono/cors";
+ import { deleteAccountContent, finishStalledOrganizationDeletions } from "./account-deletion.js";
+-import { mountAccountExportRoute } from "./account-export.js";
+-import { mountAccountImportRoute } from "./account-import.js";
+ import { settleDirectoryChange } from "./account-status.js";
+ import { mountAppAssociation, nativePasskeys } from "./app-association.js";
+-import { storeInboundAttachment } from "./artifacts.js";
+ import { mountAuditExportRoute } from "./audit-export.js";
+ import { createBillingService } from "./billing.js";
+ import { mountBillingRoutes } from "./billing-webhook.js";
+@@ -141,7 +138,6 @@ import {
+ } from "./client-ip.js";
+ import { cspReportRoutes } from "./csp-report.js";
+ import { configuredEmailProvider } from "./email.js";
+-import { mountEmailInboundRoute } from "./email-inbound.js";
+ import type { AppEnv } from "./env.js";
+ import { loadEnv } from "./env.js";
+ import { healthRoutes } from "./health.js";
+@@ -149,12 +145,9 @@ import { homeRetentionSweep } from "./home-retention.js";
+ import { startHourlySweep } from "./hourly-sweep.js";
+ import { trackInFlightRequests } from "./in-flight-requests.js";
+ import { mountLocalComputerHost } from "./local-settings.js";
+-import { marketingEmailRoutes, sendWelcomeEmail } from "./marketing-email.js";
+ import { moveMcpArgsIntoSecrets } from "./mcp-args-migration.js";
+ import { startMessagingRuntime } from "./messaging-runtime.js";
+ import { monitoringRoutes } from "./monitoring.js";
+-import { pluginSubmissionRoutes } from "./plugin-submissions.js";
+-import { sendReferralEmails } from "./referral-email.js";
+ import { mountApiRequestBodyLimits, rpcBodyLimit } from "./request-body-limit.js";
+ import { createRouter } from "./router.js";
+ import { handleRpcError } from "./rpc-errors.js";
+@@ -515,21 +508,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+     email,
+     logger: authLibraryLogger("auth.request.failed"),
+     onEmailError,
+-    afterSignIn:
+-      email && env.welcomeEmailEnabled
+-        ? (userId, headers) =>
+-            sendWelcomeEmail(
+-              {
+-                prisma,
+-                email,
+-                origin: env.authUrl,
+-                secret: env.authSecret,
+-                onError: emailErrorLogger("welcome email delivery failed"),
+-              },
+-              userId,
+-              headers,
+-            )
+-        : undefined,
+     extraOrigins: [...MOBILE_AUTH_ORIGINS, ...env.extraAuthOrigins],
+     androidAppCertFingerprints: env.passkeyAndroidCertFingerprints,
+     beforeDeleteUser: async (userId) => {
+@@ -659,21 +637,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+       })
+     : undefined;
+   reconciler?.start();
+-  const stopReferralEmails =
+-    email && env.welcomeEmailEnabled && billing?.referralsEnabled
+-      ? startHourlySweep(
+-          sendReferralEmails({
+-            prisma,
+-            email,
+-            appUrl: new URL("/app", env.webOrigin).href,
+-            origin: env.authUrl,
+-            secret: env.authSecret,
+-            onError: onEmailError,
+-          }),
+-          onEmailError,
+-        )
+-      : undefined;
+-
+   // Self-hosted deployments without billing keep every saved home.
+   const stopHomeRetention =
+     email && billingProvider && home instanceof ObjectAgentHomeStore
+@@ -853,18 +816,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+     ),
+   );
+   app.route("/", cspReportRoutes(requestClientIp));
+-  app.route(
+-    "/",
+-    pluginSubmissionRoutes({
+-      prisma,
+-      email,
+-      adminEmails: env.adminEmails,
+-      webOrigin: env.webOrigin,
+-      clientIp: requestClientIp,
+-      onEmailError,
+-    }),
+-  );
+-  app.route("/", marketingEmailRoutes(prisma, env.authSecret));
+   mountApiRequestBodyLimits(app);
+   mountScreenTarget(app, prisma, env.screenProxySecret);
+   mountScriptAssets(app);
+@@ -1010,42 +961,13 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+     if (matched) return c.newResponse(response.body, response);
+     await next();
+   });
+-  mountAccountExportRoute(app, { prisma, auth, artifacts, home });
+   mountAuditExportRoute(app, { prisma, sessionActor });
+   mountVoiceHttpRoutes(app, { prisma, secrets, env }, async (c) => {
+     const actor = await sessionActor(c.req.raw);
+     if (actor) enrichLogContext({ "user.id": actor.userId, "space.id": actor.spaceId });
+     return actor;
+   });
+-  mountAccountImportRoute(
+-    app,
+-    {
+-      prisma,
+-      sandbox,
+-      home,
+-      jobs,
+-      artifacts,
+-      dataDir: env.dataDir,
+-      messagingInstallations,
+-      maxArtifactBytes: env.maxUploadSizeBytes,
+-    },
+-    sessionActor,
+-  );
+   mountWebhookHttpRoutes(app, { prisma, secrets, events, jobs });
+-  if (env.inboundEmail) {
+-    mountEmailInboundRoute(app, {
+-      prisma,
+-      events,
+-      jobs,
+-      ...env.inboundEmail,
+-      storeAttachment: ({ spaceId, userId, ...input }) =>
+-        storeInboundAttachment(
+-          { prisma, artifacts, maxUploadSizeBytes: env.maxUploadSizeBytes },
+-          { spaceId, userId },
+-          input,
+-        ),
+-    });
+-  }
+   if (billing && billingProvider) {
+     mountBillingRoutes(app, {
+       billing,
+@@ -1124,7 +1046,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+       await userDeviceHub?.close();
+       oauthLogins.abortAll();
+       await messagingRuntime?.stop();
+-      await stopReferralEmails?.();
+       await stopHomeRetention?.();
+       await stopOrganizationDeletions();
+       await reconciler?.stop();

@@ -26,8 +26,12 @@ export function toRequest(req: IncomingMessage): Request {
   return new Request(url, init);
 }
 
-/** Resolves on drain, or when the client has gone (so a dead socket never blocks the loop). */
-function waitForDrain(res: ServerResponse): Promise<void> {
+/**
+ * Resolves on drain, or when the client has gone (so a dead socket never blocks the loop). If the
+ * response is already closed or ended, 'close' or 'drain' will not fire again, so return at once.
+ */
+export function waitForDrain(res: ServerResponse): Promise<void> {
+  if (res.destroyed || res.writableEnded) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       res.off("drain", done);
