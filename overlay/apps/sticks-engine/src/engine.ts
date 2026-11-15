@@ -8,6 +8,7 @@ import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/sr
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { startBootScheduler } from "./boot-pass.js";
 import { providerKeysInEnv } from "./gateway.js";
+import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -75,6 +76,30 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     onError: (error) => logger.error("boot pass failed", error),
   });
   await scheduler.ready;
+
+  // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
+  // Open streams and live scripts are not counted yet (no hook in upstream), so the tenant is never
+  // reported idle through them: see idle.ts and the PR.
+  const idle = new IdleTracker();
+  const untracked = () => undefined;
+  handles.app.get("/internal/idle", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (!secret) return c.json({ error: "engine secret not provisioned" }, 503);
+    if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    const now = new Date();
+    const inputs = await readIdleInputs(handles.prisma, now, untracked, untracked);
+    return c.json(idle.update(inputs, now).snapshot);
+  });
+  // The first evaluation at start: the engine is starting, so the state is new. Later changes are pushed
+  // when the engine learns of them (see the PR).
+  {
+    const secret = engineSecretFrom(dir);
+    const now = new Date();
+    const inputs = await readIdleInputs(handles.prisma, now, untracked, untracked);
+    const { snapshot, changed } = idle.update(inputs, now);
+    if (changed) void pushIdle(env.STICKS_IDLE_PUSH_URL, snapshot, secret);
+  }
+
   const stopUpstream = handles.stop;
   return {
     ...handles,

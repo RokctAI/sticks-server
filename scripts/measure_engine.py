@@ -113,16 +113,24 @@ def descendants(root: int, parent_of: dict[int, int]) -> list[int]:
     return found
 
 
-def format_summary(runs: list[tuple[str, int, int]]) -> str:
-    """The markdown table for the job summary. runs: (label, RSS in kB, processes in the tree)."""
+COLD_START_TARGET_SECONDS = 3.0
+
+
+def format_summary(runs: list[tuple[str, int, int, float | None]]) -> str:
+    """The markdown table for the job summary.
+
+    runs: (label, RSS in kB, processes in the tree, cold start to the first healthy response in seconds).
+    The cold start is measured from spawning the engine to its first 200 on GET /health (spec 7.6, target 3 s).
+    """
     lines = [
-        "## Engine idle memory (scripts/measure_engine.py)",
+        "## Engine idle memory and cold start (scripts/measure_engine.py)",
         "",
-        "| Run | Idle RSS, engine process tree | Processes in the tree |",
-        "|---|---|---|",
+        "| Run | Idle RSS, engine process tree | Processes in the tree | Cold start to first response (target 3 s) |",
+        "|---|---|---|---|",
     ]
-    for label, rss_kb, processes in runs:
-        lines.append(f"| {label} | {rss_kb / 1024:.1f} MB | {processes} |")
+    for label, rss_kb, processes, cold in runs:
+        cold_text = "not measured" if cold is None else f"{cold:.2f} s"
+        lines.append(f"| {label} | {rss_kb / 1024:.1f} MB | {processes} | {cold_text} |")
     lines += [
         "",
         f"Postgres: {POSTGRES_IMAGE} (disposable, docker CLI). Settle time before reading: "
@@ -352,11 +360,11 @@ def wait_for_health(api_port: int, proc: subprocess.Popen) -> bool:
     return False
 
 
-def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: Path) -> tuple[int, int]:
+def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: Path) -> tuple[int, int, float]:
     """Start the engine with argv, wait for /health, settle, read the tree's RSS, stop it.
 
-    Returns (RSS in kB, processes in the tree). Raises RuntimeError with the engine's stderr tail if
-    it does not answer.
+    Returns (RSS in kB, processes in the tree, cold start in seconds: spawn to the first healthy response).
+    Raises RuntimeError with the engine's stderr tail if it does not answer.
     """
     api_port = free_port()
     step(f"{label}: start on 127.0.0.1:{api_port}")
@@ -365,6 +373,7 @@ def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: 
     proc = None
     with open(stderr_path, "w", encoding="utf-8") as stderr_file:
         try:
+            spawned = time.monotonic()
             proc = subprocess.Popen(
                 argv,
                 cwd=checkout,
@@ -375,9 +384,11 @@ def measure_run(label: str, argv: list[str], checkout: Path, db_port: str, tmp: 
             if not wait_for_health(api_port, proc):
                 raise RuntimeError(f"{label}: the engine did not answer GET /health\n"
                                    + stderr_path.read_text(encoding="utf-8")[-3000:])
-            step(f"{label}: settle {SETTLE_SECONDS} s, then read RSS")
+            cold_seconds = time.monotonic() - spawned
+            step(f"{label}: first healthy response in {cold_seconds:.2f} s; settle {SETTLE_SECONDS} s, then read RSS")
             time.sleep(SETTLE_SECONDS)
-            return tree_rss_kb(proc.pid)
+            rss, count = tree_rss_kb(proc.pid)
+            return rss, count, cold_seconds
         finally:
             if proc is not None and proc.poll() is None:
                 proc.terminate()
@@ -432,15 +443,15 @@ def main() -> int:
         cid, db_port, db_password = start_postgres()
         write_secrets(tmp / "secrets", db_password)
         try:
-            tsx_rss, tsx_count = measure_run("tsx (source)", [str(tsx), ENGINE_ENTRY], checkout, db_port, tmp)
-            built_rss, built_count = measure_run("built (plain node)", [node, BUNDLE_OUT], checkout, db_port, tmp)
+            tsx_rss, tsx_count, tsx_cold = measure_run("tsx (source)", [str(tsx), ENGINE_ENTRY], checkout, db_port, tmp)
+            built_rss, built_count, built_cold = measure_run("built (plain node)", [node, BUNDLE_OUT], checkout, db_port, tmp)
             profile_table = profile_run(checkout, node, db_port, tmp)
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return EXIT_NO_ENGINE
         table = format_summary([
-            ("tsx (source, as before)", tsx_rss, tsx_count),
-            ("built (esbuild bundle, plain node)", built_rss, built_count),
+            ("tsx (source, as before)", tsx_rss, tsx_count, tsx_cold),
+            ("built (esbuild bundle, plain node)", built_rss, built_count, built_cold),
         ])
         with open(args.summary, "a", encoding="utf-8", newline="\n") as summary:
             summary.write(table + "\n" + profile_table)

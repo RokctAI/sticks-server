@@ -30,16 +30,18 @@ class ProcessTree(unittest.TestCase):
 class Summary(unittest.TestCase):
     def test_both_runs_are_reported_with_their_process_counts(self):
         text = m.format_summary([
-            ("tsx (source, as before)", 2048 * 1024 // 2, 3),
-            ("built (esbuild bundle, plain node)", 150 * 1024, 1),
+            ("tsx (source, as before)", 2048 * 1024 // 2, 3, 2.5),
+            ("built (esbuild bundle, plain node)", 150 * 1024, 1, None),
         ])
-        self.assertIn("| tsx (source, as before) | 1024.0 MB | 3 |", text)
+        self.assertIn("| tsx (source, as before) | 1024.0 MB | 3 | 2.50 s |", text)
+        self.assertIn("| built (esbuild bundle, plain node) | 150.0 MB | 1 | not measured |", text)
         self.assertIn("| built (esbuild bundle, plain node) | 150.0 MB | 1 |", text)
         self.assertIn("postgres:18-alpine", text)
 
     def test_the_table_names_both_columns(self):
-        text = m.format_summary([("x", 1024, 1)])
-        self.assertIn("| Run | Idle RSS, engine process tree | Processes in the tree |", text)
+        text = m.format_summary([("x", 1024, 1, 1.0)])
+        self.assertIn("| Run | Idle RSS, engine process tree | Processes in the tree | Cold start to first response (target 3 s) |", text)
+        self.assertEqual(m.COLD_START_TARGET_SECONDS, 3.0)
 
 
 class Bundler(unittest.TestCase):
