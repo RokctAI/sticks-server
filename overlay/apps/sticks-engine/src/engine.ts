@@ -7,6 +7,7 @@ import { deployMigrations } from "../../../packages/db/src/index.ts";
 import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/src/index.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { startBootScheduler } from "./boot-pass.js";
+import { helperSandboxFromEnv } from "./helper-computer.js";
 import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
@@ -68,6 +69,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     wakeupDriver: "memory",
     ticketBoardEnabled: true,
     logger,
+    // Commands and files for computers go to the sandbox helper when STICKS_COMPUTER=helper (brief task 16).
+    sandbox: helperSandboxFromEnv(env),
     ...options.overrides,
   });
 
