@@ -7,7 +7,7 @@ No upstream source lives here. Upstream is read straight from https://github.com
 | Path | What it is |
 |---|---|
 | `upstream.pin` | The one upstream release tag we run (plus commit and image digests). Moves only by reviewed PR. |
-| `patches/` | Our ordered patch set (`series`). Empty today: stock upstream until a real change is needed. |
+| `patches/` | Our ordered patch set (`series`). `0001` adds an idle-timeout option to the database pool (`packages/db/src/client.ts`) and passes it from `apps/api/src/app.ts` (`DB_POOL_IDLE_MS`). |
 | `contracts/used-procedures.txt` | The server calls our Dart app makes (generated from the Dart source by `scripts/extract_used_procedures.py`). Checked against every new upstream tag. |
 | `scripts/sync_upstream.py` | Finds the newest upstream tag, applies our patches to it, checks the contract, builds our overlay on it (`build_engine.py --tag`), writes a report. Never pushes. |
 | `overlay/` | Our engine code as new files only, copied onto the pinned upstream checkout at the same paths by the build. See `overlay/README.md`. |

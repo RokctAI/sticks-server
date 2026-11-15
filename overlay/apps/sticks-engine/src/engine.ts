@@ -40,6 +40,9 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // loadEnv requires DATABASE_URL to be present. The real URL (with the password) is passed as an
   // override below, so the password itself never enters the environment.
   process.env.DATABASE_URL = base;
+  // Idle pool clients close after 30 s, so a quiet tenant holds fewer connections (spec 4.3).
+  // Read by the 0001 patch in apps/api/src/app.ts.
+  process.env.DB_POOL_IDLE_MS = "30000";
 
   await deployMigrations({ migrationUrl: databaseUrl, dbPackageDir: DB_PACKAGE_DIR });
 
