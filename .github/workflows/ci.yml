@@ -1,0 +1,130 @@
+name: ci
+
+# All checks for this repo run here, never on a contributor's own computer.
+# This repo is public, so these runs use no paid Actions minutes.
+# Jobs whose script does not exist yet skip themselves, so the file can land before the code.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Upstream's tests start Postgres with Testcontainers; pull through a public mirror to avoid
+  # Docker Hub rate limits on shared runners.
+  TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Line endings are LF
+        run: |
+          if git ls-files --eol | grep -q 'i/crlf'; then
+            git ls-files --eol | grep 'i/crlf'
+            echo "Files above have CRLF line endings; convert them to LF." >&2
+            exit 1
+          fi
+      - run: python -m unittest discover -s tests -t . -v
+
+  engine:
+    name: Engine build, typecheck and overlay tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: has
+        run: |
+          if [ -f scripts/build_engine.py ]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - if: steps.has.outputs.run == 'true'
+        name: Enable corepack (uses the pnpm version upstream pins in package.json)
+        run: corepack enable
+      - if: steps.has.outputs.run == 'true'
+        name: Build the pinned engine with our patches and overlay
+        run: python scripts/build_engine.py --workdir "$RUNNER_TEMP/engine"
+      - if: steps.has.outputs.run != 'true'
+        run: echo "scripts/build_engine.py does not exist yet; nothing to build."
+
+  measure:
+    name: Measurements
+    needs: engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: has
+        run: |
+          if [ -f scripts/measure_engine.py ]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - if: steps.has.outputs.run == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - if: steps.has.outputs.run == 'true'
+        run: corepack enable
+      - if: steps.has.outputs.run == 'true'
+        name: Measure and write the numbers to the job summary
+        run: python scripts/measure_engine.py --workdir "$RUNNER_TEMP/engine" --summary "$GITHUB_STEP_SUMMARY"
+      - if: steps.has.outputs.run != 'true'
+        run: echo "scripts/measure_engine.py does not exist yet; nothing to measure."
+
+  images:
+    name: Image builds (not pushed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: has
+        run: |
+          if [ -f docker/Dockerfile ]; then echo "run=true" >> "$GITHUB_OUTPUT"; else echo "run=false" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.has.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v3
+      - if: steps.has.outputs.run == 'true'
+        name: Build every target in docker/Dockerfile and report sizes
+        run: |
+          {
+            echo "## Image sizes"
+            echo
+            echo "| Target | Size |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for target in $(grep -iE '^FROM .* AS ' docker/Dockerfile | awk '{print $NF}'); do
+            docker buildx build --load --target "$target" -t "sticks-ci:$target" -f docker/Dockerfile .
+            size=$(docker image inspect "sticks-ci:$target" --format '{{.Size}}')
+            echo "| $target | $((size / 1048576)) MB |" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - if: steps.has.outputs.run != 'true'
+        run: echo "docker/Dockerfile does not exist yet; nothing to build."
