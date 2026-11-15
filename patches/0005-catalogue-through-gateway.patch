@@ -6,7 +6,7 @@ index 996fbf6..d2837c5 100644
  } from "@earendil-works/pi-ai";
  import { clampThinkingLevel } from "@earendil-works/pi-ai";
  import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-+import { pointCatalogAtGateway } from "./pi-gateway-catalog.js";
++import { pointCatalogAtGateway } from "../../../apps/sticks-engine/src/pi-gateway-catalog.js";
  import type { AgentRunRequest } from "@rakazo/adapter-kit";
  import { canonicalPiProviderId, usableModelId } from "@rakazo/contracts";
  import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";

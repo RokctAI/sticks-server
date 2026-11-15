@@ -1,29 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { MutableModels, Provider } from "@earendil-works/pi-ai";
-import { pointCatalogAtGateway } from "./pi-gateway-catalog.js";
+import { pointCatalogAtGateway, type RoutableCollection } from "./pi-gateway-catalog.js";
 
 const ORIGINAL = process.env.STICKS_GATEWAY_URL;
 
-/** A fake collection: enough of MutableModels for the helper, with the two providers it routes. */
-function fakeCollection(): { models: MutableModels; providers: Map<string, Provider> } {
-  const providers = new Map<string, Provider>();
-  const anthropic = {
+type FakeProvider = {
+  id: string;
+  baseUrl?: string;
+  getModels(): readonly { provider: string; baseUrl: string; id: string }[];
+  stream(): string;
+};
+
+/** A fake collection with two providers and one method on the first (kept on the routed copy). */
+function fakeCollection(): { models: RoutableCollection; providers: Map<string, FakeProvider> } {
+  const providers = new Map<string, FakeProvider>();
+  const anthropic: FakeProvider = {
     id: "anthropic",
     baseUrl: "https://api.anthropic.com",
     getModels: () => [{ id: "claude", provider: "anthropic", baseUrl: "https://api.anthropic.com" }],
     stream: () => "streamed",
-  } as unknown as Provider;
-  const openai = {
+  };
+  const openai: FakeProvider = {
     id: "openai",
     baseUrl: "https://api.openai.com/v1",
     getModels: () => [{ id: "gpt", provider: "openai", baseUrl: "https://api.openai.com/v1" }],
-  } as unknown as Provider;
+    stream: () => "streamed",
+  };
   providers.set("anthropic", anthropic);
   providers.set("openai", openai);
-  const models = {
+  const models: RoutableCollection = {
     getProviders: () => [...providers.values()],
-    setProvider: (provider: Provider) => providers.set(provider.id, provider),
-  } as unknown as MutableModels;
+    setProvider: (provider) => {
+      providers.set(provider.id, provider as FakeProvider);
+    },
+  };
   return { models, providers };
 }
 
@@ -47,7 +56,7 @@ describe("the catalogue through the gateway (brief task 13)", () => {
   it("a provider's own methods still work on the routed copy", () => {
     const { models, providers } = fakeCollection();
     pointCatalogAtGateway(models);
-    expect((providers.get("anthropic") as unknown as { stream(): string }).stream()).toBe("streamed");
+    expect(providers.get("anthropic")?.stream()).toBe("streamed");
   });
 
   it("with STICKS_GATEWAY_URL unset, the collection is not changed", () => {
