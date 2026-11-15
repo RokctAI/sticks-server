@@ -36,11 +36,14 @@ Pulsar signs a short-lived token that says who the user is for this request. The
 - File: `/run/secrets/pulsar_public_key`.
 - Content: the raw 32-byte ed25519 public key, base64, as core's `generate_keypair` writes it.
 
-### Sender and transport: BLOCKED
+### Sender and transport (settled 11-15, owner's decision)
 
-- **BLOCKED: what `sender.kind` and `sender.id` Pulsar puts in the token.** The engine must know them
-  to check the sender. Not built: the verifier takes them as arguments.
-- **BLOCKED: which header the engine token travels in** (for example `Authorization: Bearer`).
+- **Sender:** `sender.kind` = `"site"`; `sender.id` = the tenant's site host name, from the environment
+  variable `STICKS_TENANT_SITE`. The engine builds the expected sender with `senderFromTenantSite`.
+- **Transport:** `Authorization: Bearer <base64url of the JSON envelope>`. `envelopeFromAuthorization`
+  reads it. The verifier then checks the envelope as above.
+
+Both are in `overlay/apps/sticks-engine/src/pulsar-token.ts`, with tests.
 
 ## 2. Roles (task 9)
 
@@ -49,16 +52,19 @@ Pulsar signs a short-lived token that says who the user is for this request. The
 | `Sticks Owner` | organization `owner`, space `owner` | Proposed. |
 | `Sticks Admin` | organization `admin`; the space stays `owner`, since upstream's space roles are only `owner` and `member` | Proposed; the spec does not settle it. |
 | `Sticks Member` | space `member` | Proposed. |
-| `Sticks Guest` | none | **BLOCKED: what a guest may do.** A token with this role is refused as `unknown_role`. |
+| `Sticks Guest` | none | Behaviour settled 11-15: read-only chat, no tools, no runs, no memory writes. No upstream role gives those limits, so the token is still refused as `unknown_role` until the engine enforces them. |
 
 The table is `STICKS_ROLE_MAP` in `overlay/apps/sticks-engine/src/pulsar-token.ts`.
+
+**Remaining gap:** a guest session needs the engine's session layer to block tools, runs and memory writes.
+That layer is not built (section 3), so mapping Guest now would give it member rights. Not mapped.
 
 ## 3. Routes to remove (task 9): not done in this PR
 
 Upstream's password, emailed-code, passkey and single sign-on routes are meant to be unmounted, so that
 sign-in is by the engine token only. This PR does not do that. The token is verified but not yet
-turned into a session, and that step needs the transport answer in section 1. Until then the routes
-stay as they are. **BLOCKED: the transport answer in section 1.**
+turned into a session. The transport is settled (section 1), so the session step is the next piece of
+task 9, not an open question. Until it lands the routes stay as they are.
 
 ## 4. Later sections (not yet written)
 

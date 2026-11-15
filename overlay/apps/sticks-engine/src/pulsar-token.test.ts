@@ -2,10 +2,12 @@ import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   canonicalJson,
+  envelopeFromAuthorization,
   NonceCache,
   PulsarTokenError,
   publicKeyFromRawBase64,
   privateKeyFromRawBase64,
+  senderFromTenantSite,
   signEnvelope,
   STICKS_ROLE_MAP,
   verifyPulsarToken,
@@ -48,6 +50,43 @@ const verifyOpts = (overrides: Partial<Parameters<typeof verifyPulsarToken>[1]> 
   tenant: TENANT,
   nowSeconds: NOW,
   ...overrides,
+});
+
+describe("settled sender and transport (11-15, docs/pulsar-engine-interface.md section 1)", () => {
+  it("the expected sender is kind site with the tenant's site host as id", () => {
+    expect(senderFromTenantSite("  sticks-acme.example  ")).toEqual({ kind: "site", id: "sticks-acme.example" });
+  });
+
+  it("an empty site host is refused", () => {
+    expect(() => senderFromTenantSite("   ")).toThrow(PulsarTokenError);
+  });
+
+  it("the token is read from Authorization: Bearer <base64url of the JSON envelope>", () => {
+    const token = sign(body());
+    const header = `Bearer ${Buffer.from(JSON.stringify(token), "utf8").toString("base64url")}`;
+    expect(envelopeFromAuthorization(header)).toEqual(JSON.parse(JSON.stringify(token)));
+  });
+
+  it("a header that is not Bearer base64url is malformed", () => {
+    for (const header of [undefined, "", "Basic abc", "Bearer not base64 !!", "Bearer "]) {
+      try {
+        envelopeFromAuthorization(header);
+        throw new Error(`should have been refused: ${String(header)}`);
+      } catch (error) {
+        expect((error as PulsarTokenError).code).toBe("malformed");
+      }
+    }
+  });
+
+  it("a Bearer value that is not JSON is malformed", () => {
+    const header = `Bearer ${Buffer.from("not json", "utf8").toString("base64url")}`;
+    try {
+      envelopeFromAuthorization(header);
+      throw new Error("should have been refused");
+    } catch (error) {
+      expect((error as PulsarTokenError).code).toBe("malformed");
+    }
+  });
 });
 
 describe("core's envelope rules, in TypeScript", () => {
