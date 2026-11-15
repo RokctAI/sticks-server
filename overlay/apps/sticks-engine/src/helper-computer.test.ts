@@ -84,3 +84,35 @@ describe("the in-container computer provider (brief task 16)", () => {
     expect(shellQuote("it's")).toBe("'it'\\''s'");
   });
 });
+
+describe("file operations through the helper (brief task 16)", () => {
+  const bytes = new Uint8Array([0, 255, 1, 128, 10, 13]);
+
+  it("a binary file written through the provider reads back byte for byte", async () => {
+    await provider.writeFile(computer, { path: "docs/blob.bin", content: bytes });
+    const back = await provider.readFile(computer, "docs/blob.bin");
+    expect(Array.from(back)).toEqual(Array.from(bytes));
+  });
+
+  it("listing shows the entry, its kind and its size", async () => {
+    await provider.writeFile(computer, { path: "listed/three.txt", content: new TextEncoder().encode("abc") });
+    const entries = await provider.listFiles(computer, "listed", context);
+    expect(entries).toEqual([{ path: "listed/three.txt", kind: "file", size: 3 }]);
+  });
+
+  it("an executable file is refused rather than written without its executable bit", async () => {
+    await expect(
+      provider.writeFile(computer, { path: "run.sh", content: new TextEncoder().encode("echo"), executable: true }),
+    ).rejects.toThrow("cannot be written through the sandbox helper");
+  });
+
+  it("a read over the byte limit is refused", async () => {
+    await provider.writeFile(computer, { path: "big.bin", content: new Uint8Array(100) });
+    await expect(provider.readFile(computer, "big.bin", context, { maxBytes: 10 })).rejects.toThrow("exceeds 10 bytes");
+  });
+
+  it("a path that leaves the Stick's folder is refused by the helper", async () => {
+    await expect(provider.readFile(computer, "../../etc/passwd")).rejects.toThrow();
+    await expect(provider.writeFile(computer, { path: "../escape.txt", content: bytes })).rejects.toThrow();
+  });
+});
