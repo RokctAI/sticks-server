@@ -73,9 +73,16 @@ class PackageOfFrame(unittest.TestCase):
     def test_the_bundled_engine_file_is_one_label(self):
         self.assertEqual(m.package_of("file:///w/apps/sticks-engine/dist/sticks-engine.mjs"), m.BUNDLED_LABEL)
 
-    def test_no_url_is_node_itself_and_other_paths_are_other(self):
+    def test_no_url_is_node_itself(self):
         self.assertEqual(m.package_of(""), "node internals")
-        self.assertEqual(m.package_of("/w/packages/x/src/y.ts"), "other")
+
+    def test_the_other_row_is_split_by_url_prefix(self):
+        self.assertEqual(m.package_of("node:internal/fs"), "node: builtins")
+        self.assertEqual(m.package_of("eval"), "eval / anonymous")
+        self.assertEqual(m.package_of("<anonymous>"), "eval / anonymous")
+        self.assertEqual(m.package_of("file:///w/packages/x/src/y.ts"), "file: outside node_modules")
+        self.assertEqual(m.package_of("/w/packages/x/src/y.ts"), "file: outside node_modules")
+        self.assertEqual(m.package_of("something-else"), "other (no file path)")
 
 
 class AggregateProfile(unittest.TestCase):
