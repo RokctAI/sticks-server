@@ -171,6 +171,10 @@ def package_of(url: str) -> str:
     """
     if not url:
         return "node internals"
+    if url.startswith("node:"):
+        return "node: builtins"
+    if url in ("eval", "<anonymous>") or url.startswith("eval") or url.startswith("<"):
+        return "eval / anonymous"
     path = url.replace("\\", "/")
     if path.startswith("file://"):
         path = path[len("file://"):]
@@ -181,7 +185,9 @@ def package_of(url: str) -> str:
         if parts[0].startswith("@") and len(parts) > 1:
             return f"{parts[0]}/{parts[1]}"
         return parts[0]
-    return "other"
+    if path.startswith("/") or (len(path) > 2 and path[1] == ":"):
+        return "file: outside node_modules"
+    return "other (no file path)"
 
 
 def aggregate_profile(root: dict) -> tuple[dict[str, int], int]:
