@@ -75,7 +75,9 @@ export function envelopeFromAuthorization(header: string | undefined): unknown {
   const match = /^Bearer ([A-Za-z0-9_-]+)$/.exec(header ?? "");
   if (!match) throw new PulsarTokenError("malformed", "Authorization is not Bearer <base64url>");
   try {
-    return JSON.parse(Buffer.from(match[1], "base64url").toString("utf8")) as unknown;
+    // base64url mapped to base64 by hand: the Node types upstream compiles against do not list "base64url".
+    const standard = match[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(Buffer.from(standard, "base64").toString("utf8")) as unknown;
   } catch {
     throw new PulsarTokenError("malformed", "token is not base64url JSON");
   }
