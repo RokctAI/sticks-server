@@ -28,14 +28,37 @@ class ProcessTree(unittest.TestCase):
 
 
 class Summary(unittest.TestCase):
-    def test_table_states_the_measure_and_the_image(self):
-        text = m.format_summary(2048 * 1024 // 2, 3)
-        self.assertIn("Idle RSS, engine process tree | 1024.0 MB", text)
-        self.assertIn("Processes in the tree | 3", text)
+    def test_both_runs_are_reported_with_their_process_counts(self):
+        text = m.format_summary([
+            ("tsx (source, as before)", 2048 * 1024 // 2, 3),
+            ("built (esbuild bundle, plain node)", 150 * 1024, 1),
+        ])
+        self.assertIn("| tsx (source, as before) | 1024.0 MB | 3 |", text)
+        self.assertIn("| built (esbuild bundle, plain node) | 150.0 MB | 1 |", text)
         self.assertIn("postgres:18-alpine", text)
 
-    def test_note_is_added_when_given(self):
-        self.assertIn("| Note | cold start later |", m.format_summary(1, 1, "cold start later"))
+    def test_the_table_names_both_columns(self):
+        text = m.format_summary([("x", 1024, 1)])
+        self.assertIn("| Run | Idle RSS, engine process tree | Processes in the tree |", text)
+
+
+class Bundler(unittest.TestCase):
+    def test_node_modules_stay_external_and_workspace_packages_are_bundled(self):
+        js = m.BUNDLER_JS
+        self.assertIn("external: true", js)
+        self.assertIn("node_modules", js)
+        # Workspace packages (not under node_modules) fall through to esbuild's own bundling.
+        self.assertIn("return undefined;", js)
+
+    def test_bundle_targets_the_engine_entry_and_one_output_file(self):
+        self.assertIn('"apps/sticks-engine/src/index.ts"', m.BUNDLER_JS)
+        self.assertIn('"apps/sticks-engine/dist/sticks-engine.mjs"', m.BUNDLER_JS)
+        self.assertIn('format: "esm"', m.BUNDLER_JS)
+        self.assertIn('platform: "node"', m.BUNDLER_JS)
+
+    def test_the_bundle_keeps_the_same_depth_for_the_packages_path(self):
+        # engine.ts resolves ../../../packages from its own folder; dist/ sits at the same depth as src/.
+        self.assertEqual(Path(m.BUNDLE_OUT).parent.parts[:-1], Path(m.ENGINE_ENTRY).parent.parts[:-1])
 
 
 if __name__ == "__main__":
