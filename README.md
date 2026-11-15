@@ -37,9 +37,10 @@ Run it by hand: `python scripts/sync_upstream.py --report report.md` (add `--wri
 pin file when the result is `10`). Tests: `python -m unittest discover -s tests -t .`
 
 ## Status
-Seeded 2026-11-09. The script and tests were run locally against upstream `v0.8.0` (up to date, newer
-tag, conflicting patch and missing procedure paths all checked). The scheduled workflow is NOT yet
-run on GitHub. Nothing is deployed from here yet.
+Seeded 2026-11-09 on upstream `v0.8.0`. Pin moved to `v0.11.0` (commit `ef5c3dd9`, image index digests
+from `docker buildx imagetools inspect`) on 2026-11-15. On that pin, `scripts/sync_upstream.py` reported
+all 131 procedures in `contracts/used-procedures.txt` present in upstream's `rpc.ts`, and no patches
+(stock upstream). The scheduled workflow is NOT yet run on GitHub. Nothing is deployed from here yet.
 
 ## Licence
 Apache License 2.0 (see `LICENSE`), the same licence as upstream Rakazo. `NOTICE` records the
