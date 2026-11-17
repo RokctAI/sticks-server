@@ -373,5 +373,36 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Installed and enabled by default in every tenant (still needs the user's token to work).
 - Tests: the plugin loads; a read call goes out with the credential header; a write call asks for approval.
 
+### Update 11-17: plugin build requests (amends tasks 21 and 22; the wording above is kept unchanged)
+Decided by the owner on 11-17. Ray must confirm each decision (see "Decisions for Ray" below).
+
+Principle: we build our own plugins and do not depend on third-party connectors. GitHub is the first built-in. The tenant wants a task done; a connector is only the means.
+
+Flow when a Stick needs a service that has no plugin:
+1. The Stick tells the tenant the task needs a connector for that service, and offers to build one. The tenant can agree or decline. Declining ends the request; the Stick does not ask again for the same service unless the tenant asks.
+2. The offer and the approval screen are plain language, for a tenant who is not a developer. They show: the service, why the task needs it, what the Stick will be able to read, what it will change (writes ask each time), and whether a connection is needed. The tenant-facing text does not use terms such as API key, token, OpenAPI or GraphQL.
+3. A tenant admin (`Sticks Admin` role) agrees or declines the request. A Stick cannot approve its own request.
+4. If agreed, the builder (task 21) creates a draft from the service's API documentation. The draft is not callable until it is built.
+5. If the service needs a login, token or key, the Stick guides the tenant through the connection step by step in the app. The credential is entered in the app, stored as a connector credential, and never sent to the model or shown in chat. If the tenant cannot complete it, the request stays open.
+6. Once built, the plugin stays built and callable for that tenant. Each write call still asks for approval through `packages/core/src/action-approval.ts`. No further admin approval is needed per use.
+
+State of a request in `plugin_draft`: requested, declined, agreed (building), built. A request is callable only when built. The connection step is a separate field, so a built plugin can still be waiting for its connection.
+
+GitHub (task 22): built by us and shipped with the engine. Seeded at boot if missing, as an approved team catalog entry, installed and enabled per tenant. It does not go through a tenant build request. The tenant's own token is the connection step.
+
+How this relates to the spec: spec §4.7 step 3 says a tenant admin approves the connector before any Stick can use it. This update puts the admin's approval on the build request, before the connector exists. A built plugin is then usable without a second approval. Ray to confirm that this is the intended reading of §4.7 step 3.
+
+Tests for task 21 (in addition to the tests above): a request cannot be agreed by the Stick that raised it; a declined request is not rebuilt; a draft cannot be called before it is built; a built plugin with no connection yet cannot be called.
+
+Reviewer: check this update does not regress the wording of tasks 21 and 22 above. That wording is kept unchanged. The one reading that changes is task 21's "the draft is never live until a tenant admin approves it": under this update the admin approves the request, and the draft is still not callable until built. Check the two readings are consistent and that nothing above was dropped.
+
+Decisions for Ray to confirm:
+1. The admin approves the build request, not the draft (changes the reading of §4.7 step 3 and task 21).
+2. A built plugin is callable without a second admin approval; write calls still ask each time.
+3. GitHub is seeded as an approved team entry and needs no tenant build request.
+4. A declined request is not offered again for the same service unless the tenant asks.
+5. The tenant-facing text is plain language with no technical terms.
+6. The connection step is guided in the app, and credentials never reach the model or chat.
+
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
