@@ -18,17 +18,19 @@ its own paths, so the gateway sees exactly the paths the provider's API defines.
 
 ## Authentication
 
-The engine reads the gateway key from `/run/secrets/gateway_key`. It sends that key where the provider's
-own key would go, in the header that provider's SDK uses:
+The engine reads the gateway key from `/run/secrets/gateway_key` at each request (patch 0005, `gatewayAuth`).
+It passes that key as the provider's API key option, so pi-ai sends it in the header that provider uses
+(for example `x-api-key` for anthropic, `Authorization: Bearer` for openai). The gateway receives the same
+header a provider would. No key is read from the environment, and a missing secret file means the provider
+is not configured, so nothing is sent.
 
-| Provider | Header | Settled |
-|---|---|---|
-| `anthropic` | `x-api-key: <gateway key>` | yes |
-| `openai` | `Authorization: Bearer <gateway key>` | yes |
-| any other provider | not settled | **BLOCKED: list the providers upstream supports and each one's header** |
+The header per provider is pi-ai's choice, not a table in this repository. Confirming that the gateway
+accepts each provider's header is part of the gateway's own contract.
 
 The engine never reads a provider key from its environment. At startup it refuses to run if any variable
-in `PROVIDER_KEY_ENV_NAMES` (`overlay/apps/sticks-engine/src/gateway.ts`) is set to a non-empty value.
+whose name ends in `_API_KEY` is set to a non-empty value (`PROVIDER_KEY_ENV_PATTERN` in
+`overlay/apps/sticks-engine/src/gateway.ts`). The rule is the name pattern, so a provider added later is
+covered without a list change.
 
 ## Streaming
 
@@ -48,9 +50,12 @@ Other statuses are the provider's own, passed through.
 
 - The gateway's internal checks with the hub (key check, balance check, caches, grace period). That is the
   gateway's own design (spec 4.4) and not the engine's.
-- Wiring the engine's model catalogue to these base URLs (**BLOCKED**). Upstream's pi runtime bakes each
-  provider's base URL into its catalogue (`packages/adapters/src/pi-runtime-models.ts`). Changing it needs
-  the `pi-ai` model type (its base URL field and key option), which is not in this repository and is only
-  checked by a CI typecheck. It is the next step for this task.
+- Wiring the engine's model catalogue to the gateway: built as patch 0005 (upstream's
+  `packages/adapters/src/pi-runtime-models.ts`). Each provider's models and base URL point at
+  `${STICKS_GATEWAY_URL}/<provider>`, and each provider's key is the gateway key (see Authentication).
+  Settled from `@earendil-works/pi-ai@1.5.0` (the package named in upstream's `pnpm-lock.yaml`; its
+  `dist/types.d.ts` on unpkg): a model has a `baseUrl`, and a provider's auth can resolve an API key.
+  The routing is checked by CI's Engine typecheck and build. It has no unit test, because it is inlined in
+  upstream's file (upstream's adapters package cannot import from `apps/`).
 - Speech providers' base URL wiring (**BLOCKED**, same reason).
 - The own-model-keys refusal: not built (an undecided proposal, spec 13).

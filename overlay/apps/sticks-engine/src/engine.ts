@@ -7,6 +7,10 @@ import { deployMigrations } from "../../../packages/db/src/index.ts";
 import { createServiceLogger, SERVICE_NAMES } from "../../../packages/logging/src/index.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { startBootScheduler } from "./boot-pass.js";
+import { helperSandboxFromEnv } from "./helper-computer.js";
+import { activeChatsWhere } from "./end-of-day-adapters.js";
+import { ensurePluginDraftTable } from "./plugin-draft-store.js";
+import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 
@@ -65,15 +69,37 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     wakeupDriver: "memory",
     ticketBoardEnabled: true,
     logger,
+    // Commands and files for computers go to the sandbox helper when STICKS_COMPUTER=helper (brief task 16).
+    sandbox: helperSandboxFromEnv(env),
     ...options.overrides,
   });
 
+  // The engine's own plugin draft table (brief task 21): created if missing, on every start.
+  await ensurePluginDraftTable(async (sql, values = []) => handles.prisma.$queryRawUnsafe<unknown[]>(sql, ...values));
+
   // Recover what a restart lost, before anything serves (spec 7.6, brief task 7). The one timer for
   // the nearest due item is held by the scheduler; stop() clears it before upstream shuts down.
+  // The end-of-day job (brief task 18) is held in the scheduler's one timer when STICKS_END_OF_DAY is set.
+  // The chat listing and cursor reads are real; the summariser (upstream's compactHistory needs the agent
+  // runtime) and the Engram write (Pulsar side) are not connected yet, so a day fails with a clear error
+  // (logged by onError) and the next day still runs.
+  const offset = tzOffsetFromEnv(env);
   const scheduler = startBootScheduler({
     prisma: handles.prisma,
     jobs: handles.jobs,
-    onError: (error) => logger.error("boot pass failed", error),
+    endOfDay: endOfDayHookFromEnv(
+      env,
+      engineEndOfDayDeps({
+        activeChats: (day) =>
+          handles.prisma.thread.findMany({ where: activeChatsWhere(day, offset), select: { id: true }, take: 500 }),
+        readThread: (threadId) =>
+          handles.prisma.thread.findUniqueOrThrow({
+            where: { id: threadId },
+            select: { nextMessageSeq: true, historyCompactedUpToSeq: true, historyCompactionSummary: true },
+          }),
+      }),
+    ),
+    onError: (error) => logger.error("boot scheduler error (boot pass or end of day)", error),
   });
   await scheduler.ready;
 

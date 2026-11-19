@@ -9,13 +9,16 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { dirname, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { COMMAND_LIMITS, capOutput, insideHome, minimalEnv, stickHome } from "./policy.js";
 
 export type SandboxRequest =
   | { id: string; op: "exec"; stickId: string; command: string; timeoutMs?: number }
   | { id: string; op: "read"; stickId: string; path: string }
   | { id: string; op: "write"; stickId: string; path: string; content: string }
+  /** Binary-safe: the file's bytes, base64 encoded. */
+  | { id: string; op: "readBytes"; stickId: string; path: string }
+  | { id: string; op: "writeBytes"; stickId: string; path: string; base64: string }
   | { id: string; op: "list"; stickId: string; path?: string };
 
 export type SandboxReply = { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string };
@@ -141,6 +144,37 @@ async function assertAncestorsInside(home: string, folder: string): Promise<void
 }
 
 /** Runs one request. Every failure becomes an error reply; nothing is thrown to the socket. */
+/** Reads a file inside the Stick's folder, with the limits and checks every read uses. */
+async function readInside(home: string, requested: string): Promise<Buffer> {
+  const target = insideHome(home, requested);
+  const info = await stat(target);
+  if (!info.isFile()) throw new Error("not a file");
+  if (info.size > COMMAND_LIMITS.fileBytes) throw new Error("file is too large to read in one go");
+  if (!(await resolvesInside(home, target))) throw new Error("path leaves the Stick's folder");
+  return readFile(target);
+}
+
+/** Writes a file inside the Stick's folder. Refuses symlinks and any path that leaves the folder. */
+async function writeInside(home: string, requested: string, data: Buffer): Promise<void> {
+  const target = insideHome(home, requested);
+  if (data.byteLength > COMMAND_LIMITS.fileBytes) throw new Error("content is too large");
+  // Before anything is created: the nearest existing folder must resolve inside the home.
+  await assertAncestorsInside(home, dirname(target));
+  await mkdir(dirname(target), { recursive: true });
+  // The target itself must not be a symlink. O_NOFOLLOW makes the open fail on one, race-free.
+  const existingTarget = await lstat(target).catch(() => null);
+  if (existingTarget?.isSymbolicLink()) throw new Error("refuses to write through a symlink");
+  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW;
+  const handle = await open(target, flags, 0o600).catch((error: NodeJS.ErrnoException) => {
+    throw new Error(error.code === "ELOOP" ? "refuses to write through a symlink" : error.message);
+  });
+  try {
+    await handle.writeFile(data);
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function handleRequest(root: string, request: SandboxRequest): Promise<SandboxReply> {
   try {
     const home = stickHome(root, request.stickId);
@@ -155,42 +189,34 @@ export async function handleRequest(root: string, request: SandboxRequest): Prom
         return { id: request.id, ok: true, result: await runCommand(home, request.command, timeoutMs) };
       }
       case "read": {
-        const target = insideHome(home, request.path);
-        const info = await stat(target);
-        if (!info.isFile()) throw new Error("not a file");
-        if (info.size > COMMAND_LIMITS.fileBytes) throw new Error("file is too large to read in one go");
-        if (!(await resolvesInside(home, target))) throw new Error("path leaves the Stick's folder");
-        return { id: request.id, ok: true, result: { content: await readFile(target, "utf8") } };
+        const bytes = await readInside(home, request.path);
+        return { id: request.id, ok: true, result: { content: bytes.toString("utf8") } };
+      }
+      case "readBytes": {
+        const bytes = await readInside(home, request.path);
+        return { id: request.id, ok: true, result: { base64: bytes.toString("base64") } };
       }
       case "write": {
-        const target = insideHome(home, request.path);
-        if (Buffer.byteLength(request.content, "utf8") > COMMAND_LIMITS.fileBytes) throw new Error("content is too large");
-        // Before anything is created: the nearest existing folder must resolve inside the home.
-        await assertAncestorsInside(home, dirname(target));
-        await mkdir(dirname(target), { recursive: true });
-        // The target itself must not be a symlink. O_NOFOLLOW makes the open fail on one, race-free.
-        const existingTarget = await lstat(target).catch(() => null);
-        if (existingTarget?.isSymbolicLink()) throw new Error("refuses to write through a symlink");
-        const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW;
-        const handle = await open(target, flags, 0o600).catch((error: NodeJS.ErrnoException) => {
-          throw new Error(error.code === "ELOOP" ? "refuses to write through a symlink" : error.message);
-        });
-        try {
-          await handle.writeFile(request.content, "utf8");
-        } finally {
-          await handle.close();
-        }
+        await writeInside(home, request.path, Buffer.from(request.content, "utf8"));
         return { id: request.id, ok: true, result: { bytes: Buffer.byteLength(request.content, "utf8") } };
+      }
+      case "writeBytes": {
+        const data = Buffer.from(request.base64, "base64");
+        await writeInside(home, request.path, data);
+        return { id: request.id, ok: true, result: { bytes: data.byteLength } };
       }
       case "list": {
         const target = request.path ? insideHome(home, request.path) : home;
         if (!(await resolvesInside(home, target))) throw new Error("path leaves the Stick's folder");
         const entries = await readdir(target, { withFileTypes: true });
-        return {
-          id: request.id,
-          ok: true,
-          result: { entries: entries.map((entry) => ({ name: entry.name, dir: entry.isDirectory() })) },
-        };
+        const listed = await Promise.all(
+          entries.map(async (entry) => {
+            // lstat: a link is reported as a link, not as the size of what it points at.
+            const info = await lstat(join(target, entry.name)).catch(() => null);
+            return { name: entry.name, dir: entry.isDirectory(), size: info?.isFile() ? info.size : 0 };
+          }),
+        );
+        return { id: request.id, ok: true, result: { entries: listed } };
       }
       default:
         throw new Error("unknown operation");

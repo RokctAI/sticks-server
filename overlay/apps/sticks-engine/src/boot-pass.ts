@@ -44,6 +44,8 @@ type BootDeps = {
   prisma: PrismaClient;
   jobs: JobPublisher;
   now?: () => Date;
+  /** The daily end-of-day job (end-of-day-wiring.ts). Optional: without it the scheduler holds no such time. */
+  endOfDay?: { nextAt(now: Date): Date; run(endAt: Date): Promise<void> };
 };
 
 /**
@@ -124,6 +126,9 @@ export function startBootScheduler(deps: BootDeps & { onError?: (error: unknown)
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   const clock = deps.now ?? (() => new Date());
+  // The end-of-day job (brief task 18) is held in the same one timer: its next instant joins the others.
+  const endOfDay = deps.endOfDay;
+  let endOfDayAt: Date | null = endOfDay ? endOfDay.nextAt(clock()) : null;
 
   const arm = (at: Date | null) => {
     if (timer) clearTimeout(timer);
@@ -133,11 +138,25 @@ export function startBootScheduler(deps: BootDeps & { onError?: (error: unknown)
     timer.unref?.();
   };
 
+  // Runs the day's end-of-day job once its instant has passed, then moves to the next instant.
+  // A failure is reported and does not hold the timer: the next day still runs.
+  const endOfDayIfDue = async (now: Date) => {
+    if (!endOfDay || !endOfDayAt || now.getTime() < endOfDayAt.getTime()) return;
+    const due = endOfDayAt;
+    endOfDayAt = endOfDay.nextAt(now);
+    try {
+      await endOfDay.run(due);
+    } catch (error) {
+      deps.onError?.(error);
+    }
+  };
+
   const run = async (): Promise<BootPassResult | undefined> => {
     if (stopped) return undefined;
     try {
       const result = await bootPass(deps);
-      arm(result.nextDueAt);
+      await endOfDayIfDue(clock());
+      arm(earliest([result.nextDueAt, endOfDayAt]));
       return result;
     } catch (error) {
       deps.onError?.(error);
