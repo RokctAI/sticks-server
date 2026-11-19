@@ -5,26 +5,15 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
 ## DO THIS NOW (read first; overrides everything below)
-Merged: 13 (#34), 15 (#35). #38 report, #40 (8), #41 (22), #42 (21) are with the owner. The upstream clone is `~/sticks-upstream` (v0.11.0). Reuse it; never clone again.
-These answers SETTLE the earlier BLOCKED items (owner's decision, 11-15). Write them into docs/pulsar-engine-interface.md as settled:
-- Token sender: `sender.kind` = `"site"`, `sender.id` = the tenant's site host name (env `STICKS_TENANT_SITE`).
-- Transport: `Authorization: Bearer <base64url of the JSON envelope>`.
-- `Sticks Guest`: read-only chat with no tools, no runs and no memory writes.
-- Model catalogue (13b): `pi-ai` is a published npm package. Find its exact name and version in `~/sticks-upstream/pnpm-lock.yaml` and read its `.d.ts` files at `https://unpkg.com/<name>@<version>/` (reading only, no install). Providers other than anthropic and openai use their own documented key header.
-- Plugins: drafts are stored in a new engine table `plugin_draft`. The admin is the `Sticks Admin` role. MCP is not supported in v1 (leave it out). Seed the GitHub plugin from our boot pass (task 7) if it is missing.
-- Idle (8): count open streams and live scripts, push on every change, and leave the sleeping notice and freeze fallback to the runner (not here).
-- Cgroup caps (15): the runner's job; not here.
+Merged: 8 (#40), 21 (#42, #52), 22 (#41, #53), 9b (#44), 13b (#45, #47, #56), 18 (#46, #48, #49), 16 (#50, #55, #57), 17 image stages (#51). The upstream clone is `~/sticks-upstream` (v0.11.0). Reuse it; never clone again.
 Work list, one draft PR per line, no CI checks between:
-1. Task 9b with the answers above (the doc change goes in this PR).
-2. Task 13b, including the startup refusal of ANY `*_API_KEY` variable.
-3. Push to the existing branches (these unblock what each PR body lists):
-   - #42: register "Build a plugin" in upstream's `builtin-skills.ts` through a file in `patches/`; store drafts in `plugin_draft`; wire `approveDraft` to upstream's `requireAdmin`. MCP stays out.
-   - #40: count open client streams and live scripts with a small counter, added to upstream's stream and script handlers through `patches/`. Push on every change, using a run-finished hook added the same way. Close idle streams with the "sleeping" notice. The freeze fallback waits for the cold-start number.
-   - #41: install and enable the GitHub plugin from our boot pass when it is missing (no upstream hook needed). Add call-level tests with a fake connector runtime in vitest: the credential header goes out, and a write waits for approval.
-4. Task 18 (after 13b's PR is up).
-5. Task 23 (new): the freeze fallback (spec 7.6), once the cold-start number is in the report.
-6. Task 24 (new): run Python tests against the patched engine in CI for every patch file (a patch that no longer applies fails the build).
-7. Append the results to report #38. Then reply in two lines.
+1. Idle follow-up to task 8: count open client streams and live scripts with a small counter, added to upstream's stream and script handlers through `patches/`. Push on every change, using a run-finished hook added the same way. Close idle streams with the "sleeping" notice.
+2. #41 follow-up: call-level tests with a fake connector runtime in vitest (the credential header goes out; a write waits for approval).
+3. Task 17 follow-up: the tenant image stage.
+4. Task 23 (new): the freeze fallback (spec 7.6), using the cold-start number from the Measurements job. If that number is not in a report yet, write BLOCKED.
+5. Task 24 (new): a CI check that every file in `patches/` still applies to v0.11.0 (a patch that no longer applies fails the build).
+6. Small fix: the doc comment on `startHelper` ends "or puts both in one group"; change it to "the runner makes the engine's user the owner".
+7. Write a new report PR (docs/reports/) with the results. Then reply in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
