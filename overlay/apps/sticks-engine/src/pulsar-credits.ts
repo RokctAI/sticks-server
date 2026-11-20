@@ -45,6 +45,8 @@ export class CreditsRefused extends Error {
   constructor(readonly reason: string) {
     super(friendlyCreditsMessage(reason));
     this.friendly = this.message;
+    // The real reason stays in the backend log only; the person sees the friendly text.
+    console.error(JSON.stringify({ level: "warn", event: "credits_refused", reason }));
   }
 }
 
