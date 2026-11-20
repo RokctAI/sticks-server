@@ -42,12 +42,14 @@ class RepinGate(unittest.TestCase):
         from scripts import sync_upstream as s
         with tempfile.TemporaryDirectory() as d:
             f = Path(d, "reviewed.txt")
-            f.write_text("v0.11.0\n")
+            f.write_text("TAG=v0.11.0\n")
             self.assertFalse(s.app_reviewed_for("v0.13.0", f))
-            f.write_text("v0.13.0\n")
+            f.write_text("TAG=v0.13.0\n")
             self.assertTrue(s.app_reviewed_for("v0.13.0", f))
             self.assertTrue(s.app_reviewed_for("v0.12.0", f))
             self.assertFalse(s.app_reviewed_for("v0.13.0", Path(d, "missing.txt")))
+            f.write_text("v0.13.0\n")
+            self.assertFalse(s.app_reviewed_for("v0.13.0", f), "only TAG=vX.Y.Z counts")
 
 
 if __name__ == "__main__":

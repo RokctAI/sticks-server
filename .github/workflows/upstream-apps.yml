@@ -1,5 +1,5 @@
 # Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
-# (upstream-apps-reviewed.txt). Watch only: nothing is synced into this repo (we fork once, see the brief).
+# (TAG= in the Sticks app's UPSTREAM_PARITY file, read with the APP_PARITY_TOKEN secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
 name: Upstream apps changes
 on:
   schedule:
@@ -18,6 +18,8 @@ jobs:
         run: git clone --quiet --filter=blob:none --no-checkout https://github.com/elie222/rakazo.git upstream
       - name: List the changes
         id: diff
+        env:
+          GH_TOKEN: ${{ secrets.APP_PARITY_TOKEN }}
         run: |
           set +e
           python3 scripts/upstream_app_changes.py --repo upstream --out report.md
@@ -34,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          title="Upstream apps changed since $(cat upstream-apps-reviewed.txt)"
+          title="Upstream apps changed since $(head -1 report.md | sed 's/^# Upstream apps: //; s/ to .*//')"
           number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
           if [ -n "$number" ]; then gh issue edit "$number" --body-file report.md
           else gh issue create --title "$title" --body-file report.md; fi

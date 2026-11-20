@@ -5,7 +5,7 @@ We fork once and never follow upstream, but our Dart app copies upstream's app b
 mean work there. This lists the changed files under apps/, grouped by app and area, so that work can be planned.
 
   python scripts/upstream_app_changes.py --repo <path to a clone with both tags> --from v0.11.0 --to v0.13.0
-Without --from, the last reviewed tag in upstream-apps-reviewed.txt is used; without --to, the newest tag.
+Without --from, the release the Sticks app has caught up with (its UPSTREAM_PARITY file) is used; without --to, the newest tag.
 """
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REVIEWED = ROOT / "upstream-apps-reviewed.txt"
 # Apps whose changes matter for the Dart app first; the rest are listed after.
 APP_ORDER = ["mobile", "web", "api", "desktop", "worker", "www"]
 
@@ -61,7 +60,7 @@ def report(old: str, new: str, changes: list[tuple[str, str]]) -> str:
         for area, n in groups[app].most_common():
             lines.append(f"| {area} | {n} |")
         lines.append("")
-    lines += ["When the Dart app has caught up, set upstream-apps-reviewed.txt to " + new + "."]
+    lines += [f"The pin moves to {new} only after the Sticks app PR that catches up sets TAG={new} in its UPSTREAM_PARITY file."]
     return "\n".join(lines) + "\n"
 
 
@@ -72,7 +71,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--to", dest="new")
     p.add_argument("--out")
     a = p.parse_args(argv)
-    old = a.old or REVIEWED.read_text(encoding="utf-8").strip()
+    if a.old:
+        old = a.old
+    else:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from sync_upstream import reviewed_tag
+
+        old = reviewed_tag()
+        if not old:
+            sys.stderr.write("could not read the app's UPSTREAM_PARITY (GH_TOKEN?); pass --from\n")
+            return 2
     new = a.new or newest_tag(a.repo)
     if old == new:
         text = f"# Upstream apps\n\nNo newer release than {old}.\n"
