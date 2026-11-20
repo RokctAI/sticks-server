@@ -7,6 +7,7 @@ import type { publicKeyFromRawBase64 } from "./pulsar-token.js";
 import type { SqlQuery } from "./plugin-draft-store.js";
 import { guestMayDo, isClosedAuthPath, isGuestSession, openPulsarSession, sessionTokenFrom } from "./pulsar-session.js";
 import type { FetchApp, NodeEnv } from "./serve.js";
+import { countStream } from "./activity.js";
 
 export const SIGN_IN_PATH = "/internal/pulsar/sign-in";
 
@@ -56,7 +57,7 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
         const raw = sessionTokenFrom(request.headers);
         if (raw && (await isGuestSession(deps.query, raw, now()))) return json(403, { error: "guests may only read" });
       }
-      return inner.fetch(request, env);
+      return countStream(await inner.fetch(request, env));
     },
   };
 }
