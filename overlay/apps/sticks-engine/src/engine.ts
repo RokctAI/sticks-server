@@ -16,6 +16,7 @@ import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
@@ -171,7 +172,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       try {
         const body = (await c.req.json()) as { onboarding_token?: unknown };
         await saveOnboardingToken(sql, body?.onboarding_token);
-        return c.json({ ok: true });
+        // The Onboarding Stick is made here, not at boot: a Stick needs an owner, and at boot nobody has signed in.
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const owner = (await sql(`SELECT "userId" FROM session WHERE token = $1 LIMIT 1`, [raw])) as Array<{ userId: string }>;
+        const stickId = owner[0] ? await ensureOnboardingStick(sql, owner[0].userId) : undefined;
+        return c.json({ ok: true, stickId: stickId ?? null });
       } catch (error) {
         return fail(c as never, error);
       }
