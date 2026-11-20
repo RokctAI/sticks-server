@@ -17,7 +17,7 @@ import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, 
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
 import { GITHUB_PLUGIN_DOCUMENT, GITHUB_PLUGIN_NAME } from "./github-plugin-document.js";
-import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
+import { resumeAfterRenewal, settleLeftovers, socketTransport } from "./pulsar-credits.js";
 import { socketEngram } from "./end-of-day-adapters.js";
 import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
@@ -166,6 +166,21 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       .then((n) => n && console.log(JSON.stringify({ msg: "settled runs left unsettled", count: n })))
       .catch((error) => logger.error("credits boot settle failed; will retry next boot", error));
   }
+
+  // Credits renewed (a new cycle, a new day for a Stick's daily cap, or a top-up): Pulsar posts
+  // {scope: "cycle" | "day" | "all"} with the engine secret, and every Stick stopped for credits carries on.
+  // Waking a Stick needs the run hooks (with the v0.13.0 repin); until then it fails and the record stays.
+  handles.app.post("/internal/credits/renewed", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (!secret) return c.json({ error: "engine secret not provisioned" }, 503);
+    if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as { scope?: string };
+    const scope = body.scope === "day" || body.scope === "all" ? body.scope : "cycle";
+    const woken = await resumeAfterRenewal(sql, scope, async () => {
+      throw new Error("waking a Stick needs the run hooks (v0.13.0 repin)");
+    });
+    return c.json({ woken });
+  });
 
   // Hub onboarding (control#204): only when STICKS_HUB_ONBOARDING=1. The chat page hands over the tenant's
   // onboarding token once (signed-in, not a guest); the plugin's three tools call the proxy routes, which add

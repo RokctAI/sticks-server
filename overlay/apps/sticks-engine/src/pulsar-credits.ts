@@ -30,7 +30,7 @@ export function friendlyCreditsMessage(reason: string): string {
   switch (reason) {
     case "tenant_credits_exhausted":
     case "credits exhausted":
-      return "You have used all your credits. Your work so far is saved. Top up and your Sticks will carry on.";
+      return "You have used all your credits for now. Your work so far is saved, and your Sticks carry on by themselves when your credits renew.";
     case "stick_daily_cap":
       return "This Stick has reached today's spending limit. Your work so far is saved, and it carries on tomorrow.";
     default:
@@ -192,4 +192,51 @@ export async function settleLeftovers(t: CreditsTransport, query: SqlQuery): Pro
     }
   }
   return n;
+}
+
+// Resume when credits renew (the owner's ruling 11-20: credits reset by cycle, e.g. monthly). A Stick stopped
+// for credits is recorded here; when Pulsar says the tenant's credits renewed (a new cycle, or a top-up), every
+// recorded Stick is woken and the record cleared.
+export const CREDIT_PAUSED_TABLE_SQL = `CREATE TABLE IF NOT EXISTS sticks_credit_paused (
+  bot_id text PRIMARY KEY,
+  reason text NOT NULL,
+  paused_at timestamptz NOT NULL DEFAULT now()
+)`;
+
+/** Records that a Stick stopped for credits. Only credit reasons are recorded; an outage is not. */
+export async function recordCreditPause(query: SqlQuery, botId: string, reason: string): Promise<boolean> {
+  if (!["tenant_credits_exhausted", "credits exhausted", "stick_daily_cap"].includes(reason)) return false;
+  await query(CREDIT_PAUSED_TABLE_SQL, []);
+  await query(
+    `INSERT INTO sticks_credit_paused (bot_id, reason) VALUES ($1, $2) ON CONFLICT (bot_id) DO UPDATE SET reason = EXCLUDED.reason, paused_at = now()`,
+    [botId, reason],
+  );
+  return true;
+}
+
+/**
+ * Credits renewed: wakes every paused Stick (for "stick_daily_cap", only when scope is "day" or "all") and clears
+ * each record after its wake succeeded. Returns the Sticks woken. A failed wake stays recorded for the next renewal.
+ */
+export async function resumeAfterRenewal(
+  query: SqlQuery,
+  scope: "cycle" | "day" | "all",
+  wake: (botId: string) => Promise<void>,
+): Promise<string[]> {
+  await query(CREDIT_PAUSED_TABLE_SQL, []);
+  const rows = (await query(`SELECT bot_id, reason FROM sticks_credit_paused ORDER BY paused_at`, [])) as Array<{ bot_id: string; reason: string }>;
+  const woken: string[] = [];
+  for (const row of rows) {
+    const daily = row.reason === "stick_daily_cap";
+    if (scope === "cycle" && daily) continue;
+    if (scope === "day" && !daily) continue;
+    try {
+      await wake(row.bot_id);
+      await query(`DELETE FROM sticks_credit_paused WHERE bot_id = $1`, [row.bot_id]);
+      woken.push(row.bot_id);
+    } catch {
+      // Stays paused; the next renewal tries again.
+    }
+  }
+  return woken;
 }
