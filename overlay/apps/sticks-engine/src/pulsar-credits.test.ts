@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreditsRefused, microsOf, RunCredits, settleLeftovers, type CreditsTransport } from "./pulsar-credits.js";
+import { CreditsRefused, microsOf, recordCreditPause, resumeAfterRenewal, RunCredits, settleLeftovers, type CreditsTransport } from "./pulsar-credits.js";
 
 type Row = { run_id: string; block_micros: number; used_micros: number; usage: unknown; settled_at: Date | null };
 
@@ -36,7 +36,7 @@ const run = { runId: "r1", stickId: "s1", userId: "u1" };
 describe("credits from Pulsar (brief task 12)", () => {
   it("does not start a run Pulsar refuses, and says why", async () => {
     const p = fakePulsar({ reserve: "no credits left" });
-    await expect(RunCredits.start(p.t, fakeDb().query, run)).rejects.toThrow(new CreditsRefused("no credits left"));
+    await expect(RunCredits.start(p.t, fakeDb().query, run)).rejects.toMatchObject({ reason: "no credits left" });
   });
 
   it("spends in memory and extends below 20 percent", async () => {
@@ -72,5 +72,29 @@ describe("credits from Pulsar (brief task 12)", () => {
   it("counts an unknown cost as one credit", () => {
     expect(microsOf(undefined)).toBe(10_000);
     expect(microsOf(0.0000011)).toBe(2);
+  });
+
+  it("shows friendly words, never the raw reason or our balance", () => {
+    expect(new CreditsRefused("tenant_credits_exhausted").message).toContain("when your credits renew");
+    expect(new CreditsRefused("stick_daily_cap").message).toContain("tomorrow");
+    expect(new CreditsRefused("service_unavailable").message).toBe("Sticks is not available right now. Your work so far is saved. Please try again a little later.");
+    expect(new CreditsRefused("platform balance 0.00 USD").message).not.toContain("USD");
+  });
+
+  it("resumes Sticks stopped for credits when credits renew, not after an outage", async () => {
+    const paused = new Map<string, string>();
+    const query = async (sql: string, v: unknown[] = []) => {
+      if (sql.startsWith("INSERT")) paused.set(v[0] as string, v[1] as string);
+      else if (sql.startsWith("SELECT")) return [...paused].map(([bot_id, reason]) => ({ bot_id, reason }));
+      else if (sql.startsWith("DELETE")) paused.delete(v[0] as string);
+      return [];
+    };
+    expect(await recordCreditPause(query, "b1", "tenant_credits_exhausted")).toBe(true);
+    expect(await recordCreditPause(query, "b2", "stick_daily_cap")).toBe(true);
+    expect(await recordCreditPause(query, "b3", "service_unavailable")).toBe(false);
+    const woke: string[] = [];
+    expect(await resumeAfterRenewal(query, "cycle", async (b) => void woke.push(b))).toEqual(["b1"]);
+    expect(await resumeAfterRenewal(query, "day", async (b) => void woke.push(b))).toEqual(["b2"]);
+    expect(paused.size).toBe(0);
   });
 });
