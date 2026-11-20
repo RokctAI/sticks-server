@@ -410,5 +410,15 @@ Settled decisions:
 5. The tenant-facing text is plain language with no technical terms.
 6. The connection step is guided in the app, and credentials never reach the model or chat.
 
+### Task 25: hub sign-in token as a small standalone SDK (owner's note 11-15, reworded 11-20; after task 9 merges)
+- Sticks signs users in with a short-lived token signed by the hub (`overlay/apps/sticks-engine/src/pulsar-token.ts` verifies it; `pulsar-session.ts` and `pulsar-front.ts` turn it into a session). Gravity needs the same sign-in, and Gravity is neither Frappe nor Pulsar.
+- So the SDK is backend-agnostic: pure verification with no Frappe, Pulsar or network calls. Input: the token (Bearer value) plus the hub's public key, the expected sender, the app's tenant id and the clock. Output: `{user, role, tenant, exp}` or a coded error (malformed, bad_signature, stale, replay, expired, wrong_tenant, unknown_role). It also ships the replay cache. Role names are passed in by the app, not fixed.
+- Where (the owner's ruling 11-20): the private `RokctAI/users` repo, which already holds the auth SDK, under `auth/hub-token/` (TypeScript package `@rokct/hub-token` in `auth/hub-token/ts`, Python package `hub_token` in `auth/hub-token/py`), with the same test vectors on both sides. Not in control, not in a public repo.
+- Install: no registry. Apps pin a git tag of the users repo, `hub-token-vX.Y.Z`. TypeScript (pnpm): `"@rokct/hub-token": "github:RokctAI/users#hub-token-vX.Y.Z&path:auth/hub-token/ts"`. Python: `hub-token @ git+https://github.com/RokctAI/users@hub-token-vX.Y.Z#subdirectory=auth/hub-token/py`.
+- Access: the org secret `MONOREPO_PAT` (never a per-repo secret, never printed). In CI, before installing: `git config --global url."https://x-access-token:${MONOREPO_PAT}@github.com/".insteadOf "https://github.com/"` with the secret passed as an env var to that step only. In Docker: a BuildKit secret (`--secret id=gh_token,env=MONOREPO_PAT`) mounted only in the install step (`RUN --mount=type=secret,id=gh_token ...`), so it never lands in an image layer.
+- Versions: semver tags. A new token format would be a new envelope `v` (2), accepted alongside 1 for a release, so an app on an older tag keeps working until it bumps. It must pass `sdk_validator.py`. It is a backend library, not app-facing, so the demo data, tour and guide rules do not apply.
+- Backward compatible: the token format stays exactly as docs/pulsar-engine-interface.md section 1 says; nothing that issues or accepts tokens today changes. The engine then imports it instead of its own copy.
+- What stays in each app: turning the verified user into that app's own session (for Sticks: upstream session rows, closed routes, guests).
+
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.

@@ -334,6 +334,9 @@ def engine_env(db_port: str, secrets_dir: Path, data_dir: Path, api_port: int) -
         "SIGNUPS_ENABLED": "true",
         "STICKS_DATABASE_URL": f"postgresql://postgres@127.0.0.1:{db_port}/postgres",
         "STICKS_SECRETS_DIR": str(secrets_dir),
+        # Sign-in by Pulsar token (task 9): the tenant id in tokens and the sender id. No token is sent here.
+        "STICKS_TENANT": "measure-tenant",
+        "STICKS_TENANT_SITE": "measure.invalid",
     })
     return env
 

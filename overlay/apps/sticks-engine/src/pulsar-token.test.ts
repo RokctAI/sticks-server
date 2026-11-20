@@ -101,16 +101,20 @@ describe("core's envelope rules, in TypeScript", () => {
     );
   });
 
-  it("the role map has the three roles the spec names with a clear upstream role; Guest is not mapped", () => {
-    expect(STICKS_ROLE_MAP).toEqual({ "Sticks Owner": "owner", "Sticks Admin": "admin", "Sticks Member": "member" });
-    expect(STICKS_ROLE_MAP["Sticks Guest"]).toBeUndefined();
+  it("the role map has the four Sticks roles; Guest maps to member", () => {
+    expect(STICKS_ROLE_MAP).toEqual({
+      "Sticks Owner": "owner",
+      "Sticks Admin": "admin",
+      "Sticks Member": "member",
+      "Sticks Guest": "member",
+    });
   });
 });
 
 describe("verifyPulsarToken (brief task 9)", () => {
   it("a valid token returns the user, the mapped role and the tenant", () => {
     const result = verifyPulsarToken(sign(body()), verifyOpts());
-    expect(result).toEqual({ user: "user-42", role: "member", tenant: TENANT, exp: NOW + 300 });
+    expect(result).toEqual({ user: "user-42", role: "member", tenant: TENANT, exp: NOW + 300, guest: false });
   });
 
   it("an expired token (exp in the past, fresh signature) is refused", () => {
@@ -143,8 +147,13 @@ describe("verifyPulsarToken (brief task 9)", () => {
     }
   });
 
-  it("an unknown role is refused (Guest is unmapped until the owner decides)", () => {
-    for (const role of ["Sticks Guest", "Sticks Wizard"]) {
+  it("a Guest token is accepted as member and marked guest; other tokens are not guests", () => {
+    expect(verifyPulsarToken(sign(body({ role: "Sticks Guest" })), verifyOpts())).toMatchObject({ role: "member", guest: true });
+    expect(verifyPulsarToken(sign(body()), verifyOpts()).guest).toBe(false);
+  });
+
+  it("an unknown role is refused", () => {
+    for (const role of ["Sticks Wizard"]) {
       try {
         verifyPulsarToken(sign(body({ role })), verifyOpts());
         throw new Error("should have been refused");
