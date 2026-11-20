@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Server } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AdapterContext, CommandRequest, ComputerRef, ProcessEvent } from "../../../packages/adapter-kit/src/index.ts";
-import { HelperComputerProvider, helperSandboxFromEnv, shellQuote } from "./helper-computer.js";
+import { HelperComputerProvider, clientTimeoutFor, helperSandboxFromEnv, shellQuote } from "./helper-computer.js";
 import { startHelper } from "../sandbox/helper.js";
 
 let root: string;
@@ -135,5 +135,14 @@ describe("selecting the helper computer provider (brief task 16)", () => {
       events.push(event);
     }
     expect(stdoutOf(events)).toBe("via-env\n");
+  });
+});
+
+describe("clientTimeoutFor", () => {
+  it("waits the helper's limit plus a 10 s grace", () => {
+    expect(clientTimeoutFor(undefined)).toBe(70_000);
+    expect(clientTimeoutFor(300_000)).toBe(310_000);
+    expect(clientTimeoutFor(60 * 60_000)).toBe(610_000);
+    expect(clientTimeoutFor(0)).toBe(10_001);
   });
 });
