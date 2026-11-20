@@ -102,6 +102,12 @@ The engine calls Pulsar over the unix socket in `STICKS_PULSAR_SOCKET`. Each cal
 | `/credits/extend` | `{run}` | `{ok: true, block_micros}` adds a block, or `{ok: false, reason}` stops the run with "credits exhausted". |
 | `/credits/settle` | `{run, used_micros, usage}` | `{ok: true}`. Idempotent on `run`: Pulsar must accept a repeat and charge once. |
 
+**Refusal reasons** (`reason`): `tenant_credits_exhausted` (the tenant's wallet is empty), `stick_daily_cap` (the Stick's
+daily cap), `service_unavailable` (our platform balance or a model provider is out; Pulsar must refuse rather than let
+tenants draw on an empty platform account). The engine never shows the reason itself: the person sees a friendly
+message (`friendlyCreditsMessage`) that never mentions our balance. Work done before a refusal is kept, and settle
+charges only what ran.
+
 Each model call takes its maximum cost off the block in memory, with no call to Pulsar. Below 20 percent left, the engine extends. Runs are kept in `sticks_credit_runs`. At boot the engine settles every run that has no `settled_at`, so a crash before settle is still charged.
 
 ## 6. Later sections (not yet written)

@@ -20,9 +20,31 @@ export const CREDIT_RUNS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS sticks_credit_r
   created_at timestamptz NOT NULL DEFAULT now()
 )`;
 
+/**
+ * Reason codes Pulsar sends with a refusal. The person never sees the code or our own balance: they see a
+ * friendly message (friendlyCreditsMessage). Work done before the refusal is kept; settle charges only what ran.
+ */
+export type RefusalCode = "tenant_credits_exhausted" | "stick_daily_cap" | "service_unavailable";
+
+export function friendlyCreditsMessage(reason: string): string {
+  switch (reason) {
+    case "tenant_credits_exhausted":
+    case "credits exhausted":
+      return "You have used all your credits. Your work so far is saved. Top up and your Sticks will carry on.";
+    case "stick_daily_cap":
+      return "This Stick has reached today's spending limit. Your work so far is saved, and it carries on tomorrow.";
+    default:
+      // service_unavailable (our platform balance or a model provider is down), or anything unknown.
+      return "Sticks is not available right now. Your work so far is saved. Please try again a little later.";
+  }
+}
+
 export class CreditsRefused extends Error {
+  /** The friendly text to show the person, never the raw reason. */
+  readonly friendly: string;
   constructor(readonly reason: string) {
-    super(reason);
+    super(friendlyCreditsMessage(reason));
+    this.friendly = this.message;
   }
 }
 

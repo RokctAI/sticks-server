@@ -36,7 +36,7 @@ const run = { runId: "r1", stickId: "s1", userId: "u1" };
 describe("credits from Pulsar (brief task 12)", () => {
   it("does not start a run Pulsar refuses, and says why", async () => {
     const p = fakePulsar({ reserve: "no credits left" });
-    await expect(RunCredits.start(p.t, fakeDb().query, run)).rejects.toThrow(new CreditsRefused("no credits left"));
+    await expect(RunCredits.start(p.t, fakeDb().query, run)).rejects.toMatchObject({ reason: "no credits left" });
   });
 
   it("spends in memory and extends below 20 percent", async () => {
@@ -72,5 +72,12 @@ describe("credits from Pulsar (brief task 12)", () => {
   it("counts an unknown cost as one credit", () => {
     expect(microsOf(undefined)).toBe(10_000);
     expect(microsOf(0.0000011)).toBe(2);
+  });
+
+  it("shows friendly words, never the raw reason or our balance", () => {
+    expect(new CreditsRefused("tenant_credits_exhausted").message).toContain("Top up");
+    expect(new CreditsRefused("stick_daily_cap").message).toContain("tomorrow");
+    expect(new CreditsRefused("service_unavailable").message).toBe("Sticks is not available right now. Your work so far is saved. Please try again a little later.");
+    expect(new CreditsRefused("platform balance 0.00 USD").message).not.toContain("USD");
   });
 });
