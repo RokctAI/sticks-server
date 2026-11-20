@@ -52,19 +52,22 @@ Both are in `overlay/apps/sticks-engine/src/pulsar-token.ts`, with tests.
 | `Sticks Owner` | organization `owner`, space `owner` | Proposed. |
 | `Sticks Admin` | organization `admin`; the space stays `owner`, since upstream's space roles are only `owner` and `member` | Proposed; the spec does not settle it. |
 | `Sticks Member` | space `member` | Proposed. |
-| `Sticks Guest` | none | Behaviour settled 11-15: read-only chat, no tools, no runs, no memory writes. No upstream role gives those limits, so the token is still refused as `unknown_role` until the engine enforces them. |
+| `Sticks Guest` | space `member`, marked guest | Settled 11-20. A guest session may only read (GET, HEAD, OPTIONS); every other request answers 403. Sending chat messages is not allowed for guests in v1. |
 
-The table is `STICKS_ROLE_MAP` in `overlay/apps/sticks-engine/src/pulsar-token.ts`.
+The table is `STICKS_ROLE_MAP` in `overlay/apps/sticks-engine/src/pulsar-token.ts`. Guests are recorded in the
+engine's `sticks_guest` table at sign-in.
 
-**Remaining gap:** a guest session needs the engine's session layer to block tools, runs and memory writes.
-That layer is not built (section 3), so mapping Guest now would give it member rights. Not mapped.
+## 3. Sign-in and closed routes (task 9, built)
 
-## 3. Routes to remove (task 9): not done in this PR
-
-Upstream's password, emailed-code, passkey and single sign-on routes are meant to be unmounted, so that
-sign-in is by the engine token only. This PR does not do that. The token is verified but not yet
-turned into a session. The transport is settled (section 1), so the session step is the next piece of
-task 9, not an open question. Until it lands the routes stay as they are.
+- `POST /internal/pulsar/sign-in` with `Authorization: Bearer <base64url envelope>` (section 1). On success it
+  creates or updates the user row (id = the Pulsar user id; email `<user>@<tenant>.sticks.invalid`, never mailed),
+  sets the role in the tenant's organization and default space when first boot has created them, and opens a
+  12-hour session. It answers `{ token, expiresAt }`; the app sends `token` as `Authorization: Bearer <token>`.
+  A fresh Pulsar token signs in again. Errors answer 401 with the token error code, or 503 when
+  `/run/secrets/pulsar_public_key` is missing.
+- Every other upstream route under `/api/auth/` answers 404, except `get-session`, `sign-out` and `capabilities`.
+  Password, emailed code, passkey, SSO and sign-up are therefore unreachable.
+- The engine needs `STICKS_TENANT` (the tenant id in tokens) and `STICKS_TENANT_SITE` (the sender id).
 
 ## 4. Later sections (not yet written)
 

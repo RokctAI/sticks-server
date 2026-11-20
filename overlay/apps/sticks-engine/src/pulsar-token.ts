@@ -49,13 +49,18 @@ export type TokenBody = { tenant: string; user: string; role: string; exp: numbe
 /**
  * Sticks roles to upstream's. Owner and Member are clear. Admin maps to upstream's organization admin
  * (the space itself has only owner and member), which is a proposal, not settled by the spec.
- * Guest has no mapping: a token that carries it is refused until the owner decides (BLOCKED, see the PR).
+ * Guest maps to member and is marked guest: the engine's outer router lets a guest session only read
+ * (pulsar-session.ts, settled 11-20).
  */
 export const STICKS_ROLE_MAP: Readonly<Record<string, "owner" | "admin" | "member">> = {
   "Sticks Owner": "owner",
   "Sticks Admin": "admin",
   "Sticks Member": "member",
+  "Sticks Guest": "member",
 };
+
+/** The Sticks role whose sessions may only read. */
+export const GUEST_ROLE = "Sticks Guest";
 
 /** The sender kind Pulsar signs with for a tenant's engine (settled 11-15, docs/pulsar-engine-interface.md). */
 export const SETTLED_SENDER_KIND = "site";
@@ -156,7 +161,7 @@ export function verifyPulsarToken(
     nowSeconds: number;
     nonces?: NonceCache;
   },
-): { user: string; role: "owner" | "admin" | "member"; tenant: string; exp: number } {
+): { user: string; role: "owner" | "admin" | "member"; tenant: string; exp: number; guest: boolean } {
   const env = envelope as Partial<TokenEnvelope> | null;
   if (!env || typeof env !== "object") throw new PulsarTokenError("malformed", "not an object");
   const { v, sender, ts, nonce, body, sig } = env;
@@ -194,7 +199,7 @@ export function verifyPulsarToken(
     ? STICKS_ROLE_MAP[token.role]
     : undefined;
   if (!role) throw new PulsarTokenError("unknown_role", token.role);
-  return { user: token.user, role, tenant: token.tenant, exp: token.exp };
+  return { user: token.user, role, tenant: token.tenant, exp: token.exp, guest: token.role === GUEST_ROLE };
 }
 
 /** Signs a body the way core's sign() does. For the fake Pulsar in tests; the engine never signs. */

@@ -10,6 +10,7 @@ import { startBootScheduler } from "./boot-pass.js";
 import { helperSandboxFromEnv } from "./helper-computer.js";
 import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
+import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
@@ -76,6 +77,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
 
   // The engine's own plugin draft table (brief task 21): created if missing, on every start.
   await ensurePluginDraftTable(async (sql, values = []) => handles.prisma.$queryRawUnsafe<unknown[]>(sql, ...values));
+  // Guest sign-ins are recorded here (brief task 9): the front door lets them only read.
+  await handles.prisma.$queryRawUnsafe(GUEST_TABLE_SQL);
 
   // Recover what a restart lost, before anything serves (spec 7.6, brief task 7). The one timer for
   // the nearest due item is held by the scheduler; stop() clears it before upstream shuts down.
