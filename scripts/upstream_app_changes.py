@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Which parts of the upstream repo changed between two Rakazo release tags (watch only, nothing is synced).
+"""Which parts of upstream's apps/ changed between two Rakazo release tags (watch only, nothing is synced).
 
 We fork once and never follow upstream, but our Dart app copies upstream's app behaviour, so a new release can
-mean work there. This lists every changed file in the repo, grouped by app, package or folder and area, so that work can be planned.
+mean work there. This lists the changed files under apps/, grouped by app and area, so that work can be planned.
 
   python scripts/upstream_app_changes.py --repo <path to a clone with both tags> --from v0.11.0 --to v0.13.0
 Without --from, the release the Sticks app has caught up with (the "upstream" field of its version.json) is used; without --to, the newest tag.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 # Apps whose changes matter for the Dart app first; the rest are listed after.
-APP_ORDER = ["apps/mobile", "apps/web", "apps/api", "apps/desktop", "apps/worker", "apps/www"]
+APP_ORDER = ["mobile", "web", "api", "desktop", "worker", "www"]
 
 
 def git(repo: str, *args: str) -> str:
@@ -31,13 +31,8 @@ def newest_tag(repo: str) -> str:
 
 
 def area_of(path: str) -> tuple[str, str]:
-    """(group, area). Groups are apps/<app> and packages/<pkg>, else the top-level folder, else (root)."""
     parts = path.split("/")
-    if len(parts) == 1:
-        return "(root)", parts[0]
-    if parts[0] not in ("apps", "packages"):
-        return parts[0], parts[1] if len(parts) > 2 else "(folder root)"
-    app = f"{parts[0]}/{parts[1]}"
+    app = parts[1] if len(parts) > 1 else "(root)"
     rest = parts[2:]
     if not rest:
         return app, "(app root)"
@@ -66,28 +61,39 @@ def patched_files(patches_dir: Path) -> dict[str, list[str]]:
 
 
 def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]]) -> list[str]:
-    """Upstream changes to files a patch touches. A patch that still applies can still need a second look."""
-    hits = [(status, path) for status, path in touched if path in patched]
-    lines = ["## Files our patches touch", ""]
-    if not hits:
+    """Repo-wide: per patch, the files it touches that changed upstream. A patch that still applies can still need a look."""
+    per: dict[str, list[str]] = collections.defaultdict(list)
+    for status, path in touched:
+        for name in patched.get(path, []):
+            per[name].append(f"{path} ({ {'M': 'changed', 'D': 'deleted', 'A': 'added'}.get(status, status) })")
+    lines = ["## Our patches (whole repo)", ""]
+    if not per:
         return lines + ["No upstream change touches a file in patches/.", ""]
-    lines += [f"{len(hits)} patched file(s) changed upstream. Re-read these patches before repinning, even if they still apply.", "", "| File | Change | Patches |", "|---|---|---|"]
-    lines += [f"| {path} | {status} | {', '.join(patched[path])} |" for status, path in hits]
-    return lines + [""]
+    for name in sorted(per):
+        lines.append(f"- **{name}**: {', '.join(per[name])}")
+    return lines + ["", "Re-read these patches before repinning, even if they still apply.", ""]
 
 
-def report(old: str, new: str, changes: list[tuple[str, str]], patch_lines: list[str] | None = None) -> str:
+def other_counts(counts: dict[str, int]) -> list[str]:
+    """Everything outside apps/, one line per top-level folder."""
+    if not counts:
+        return []
+    return ["## Rest of the repo", "", "; ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])) + " files changed.", ""]
+
+
+def report(old: str, new: str, changes: list[tuple[str, str]], patch_lines: list[str] | None = None,
+           notes: dict[tuple[str, str], list[str]] | None = None) -> str:
     if not changes:
-        return f"# Upstream changes: {old} to {new}\n\nNo file changed.\n\n" + "\n".join(patch_lines or [])
+        return f"# Upstream apps: {old} to {new}\n\nNo file under apps/ changed.\n\n" + "\n".join(patch_lines or [])
     groups = summarise(changes)
-    lines = [f"# Upstream changes: {old} to {new}", "", f"{len(changes)} files changed in the whole repo (apps first, then packages and the rest).", ""]
-    for app in sorted(groups, key=lambda a: (APP_ORDER.index(a) if a in APP_ORDER else 50 if a.startswith("apps/") else 60 if a.startswith("packages/") else 70, a)):
+    lines = [f"# Upstream apps: {old} to {new}", "", f"{len(changes)} files changed under apps/.", ""] + [l for l in (patch_lines or []) if l is not None]
+    for app in sorted(groups, key=lambda a: (APP_ORDER.index(a) if a in APP_ORDER else 99, a)):
         total = sum(groups[app].values())
-        lines += [f"## {app} ({total} files)", "", "| Area | Files |", "|---|---|"]
+        lines += [f"## apps/{app} ({total} files)", "", "| Area | Files | What changed (upstream commits) |", "|---|---|---|"]
         for area, n in groups[app].most_common():
-            lines.append(f"| {area} | {n} |")
+            what = "; ".join((notes or {}).get((app, area), [])) or "-"
+            lines.append(f"| {area} | {n} | {what} |")
         lines.append("")
-    lines += patch_lines or []
     lines += [f"The pin moves to {new} only after the Sticks app PR that catches up sets \"upstream\": \"{new}\" in its version.json."]
     return "\n".join(lines) + "\n"
 
@@ -114,12 +120,21 @@ def main(argv: list[str] | None = None) -> int:
         text = f"# Upstream apps\n\nNo newer release than {old}.\n"
         changed = False
     else:
-        raw = git(a.repo, "diff", "--name-status", "--no-renames", old, new)
+        raw = git(a.repo, "diff", "--name-status", "--no-renames", old, new, "--", "apps/")
         changes = [tuple(line.split("\t", 1)) for line in raw.splitlines() if "\t" in line]
         patched = patched_files(ROOT / "patches")
         touched_raw = git(a.repo, "diff", "--name-status", "--no-renames", old, new, "--", *patched) if patched else ""
         touched = [tuple(line.split("\t", 1)) for line in touched_raw.splitlines() if "\t" in line]
-        text = report(old, new, changes, patch_section(touched, patched))  # type: ignore[arg-type]
+        notes = {}
+        for app, areas in summarise(changes).items():  # type: ignore[arg-type]
+            for area in areas:
+                where = f"apps/{app}" if area == "(app root)" else f"apps/{app}/{area}"
+                subjects = git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", where).splitlines()
+                notes[(app, area)] = [t.replace("|", "/")[:80] for t in subjects[:3]] + ([f"+{len(subjects) - 3} more"] if len(subjects) > 3 else [])
+        rest: dict[str, int] = collections.Counter()
+        for line in git(a.repo, "diff", "--name-only", "--no-renames", old, new, "--", ".", ":(exclude)apps/").splitlines():
+            rest[line.split("/")[0] if "/" in line else "(root files)"] += 1
+        text = report(old, new, changes, patch_section(touched, patched) + other_counts(rest), notes)  # type: ignore[arg-type]
         changed = bool(changes) or bool(touched)
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8", newline="\n")

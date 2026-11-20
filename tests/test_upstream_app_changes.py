@@ -15,9 +15,9 @@ class UpstreamAppChanges(unittest.TestCase):
         changes = [("M", "apps/mobile/lib/thread/a.ts"), ("A", "apps/mobile/lib/thread/b.ts"),
                    ("M", "apps/web/src/x/y.ts"), ("D", "apps/mobile/app.json")]
         groups = m.summarise(changes)
-        self.assertEqual(groups["apps/mobile"]["lib/thread"], 2)
-        self.assertEqual(groups["apps/mobile"]["(app root)"], 1)
-        self.assertEqual(groups["apps/web"]["src/x"], 1)
+        self.assertEqual(groups["mobile"]["lib/thread"], 2)
+        self.assertEqual(groups["mobile"]["(app root)"], 1)
+        self.assertEqual(groups["web"]["src/x"], 1)
         text = m.report("v1.0.0", "v1.1.0", changes)
         self.assertLess(text.index("apps/mobile"), text.index("apps/web"))
 
@@ -70,6 +70,6 @@ class PatchOverlapTest(unittest.TestCase):
             patched = u.patched_files(Path(d))
         self.assertEqual(patched, {"apps/api/a.ts": ["0001-x.patch"]})
         text = "\n".join(u.patch_section([("M", "apps/api/a.ts"), ("M", "apps/web/b.ts")], patched))
-        self.assertIn("| apps/api/a.ts | M | 0001-x.patch |", text)
+        self.assertIn("**0001-x.patch**: apps/api/a.ts (changed)", text)
         self.assertNotIn("apps/web/b.ts", text)
         self.assertIn("No upstream change", "\n".join(u.patch_section([], patched)))

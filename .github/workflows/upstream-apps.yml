@@ -1,4 +1,4 @@
-# Weekly: list which parts of the upstream repo changed (all of it, apps first) since the release our Dart app last caught up with
+# Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
 # ("upstream" in the Sticks app's version.json, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
 name: Upstream apps changes
 on:
