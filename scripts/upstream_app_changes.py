@@ -49,6 +49,23 @@ def summarise(changes: list[tuple[str, str]]) -> dict[str, collections.Counter]:
     return out
 
 
+FIX_WORDS = re.compile(r"^(fix|hotfix|revert)\b|^fix\(|\b(fix|fixes|fixed|bug|security|crash|regression|broken|leak|vulnerab\w*)\b", re.I)
+
+
+def is_fix(title: str) -> bool:
+    return bool(FIX_WORDS.search(title))
+
+
+def fixes_first(titles: list[str]) -> list[str]:
+    """Fixes first, each marked [fix]; then the rest, marked [feature]."""
+    return [f"[fix] {t}" for t in titles if is_fix(t)] + [f"[feature] {t}" for t in titles if not is_fix(t)]
+
+
+def split_counts(label: str, titles: list[str]) -> str:
+    fixes = sum(1 for t in titles if is_fix(t))
+    return f"- {label}: **{fixes} fixes**, {len(titles) - fixes} features ({len(titles)} commits)"
+
+
 def patched_files(patches_dir: Path) -> dict[str, list[str]]:
     """Upstream files our patches touch: path -> patch names (from the patches' +++/--- headers)."""
     out: dict[str, list[str]] = collections.defaultdict(list)
@@ -74,7 +91,7 @@ def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]],
         lines.append(f"- **{name}**")
         for entry in per[name]:
             lines.append(f"  - {entry}")
-            for title in (commits or {}).get(entry.split(" (")[0], []):
+            for title in fixes_first((commits or {}).get(entry.split(" (")[0], [])):
                 lines.append(f"    - {title}")
     return lines + ["", "Read each upstream commit above: upstream may now do what our patch does (duplicate work, even with no conflict).", ""]
 
@@ -135,11 +152,17 @@ def main(argv: list[str] | None = None) -> int:
             for area in areas:
                 where = f"apps/{app}" if area == "(app root)" else f"apps/{app}/{area}"
                 subjects = git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", where).splitlines()
-                notes[(app, area)] = [t.replace("|", "/")[:80] for t in subjects[:3]] + ([f"+{len(subjects) - 3} more"] if len(subjects) > 3 else [])
+                marked = fixes_first(subjects)
+                nfix = sum(1 for t in subjects if is_fix(t))
+                notes[(app, area)] = [f"{nfix} fix(es), {len(subjects) - nfix} feature(s)"] + [t.replace("|", "/")[:90] for t in marked[:3]] + ([f"+{len(marked) - 3} more"] if len(marked) > 3 else [])
         rest: dict[str, int] = collections.Counter()
         for line in git(a.repo, "diff", "--name-only", "--no-renames", old, new, "--", ".", ":(exclude)apps/").splitlines():
             rest[line.split("/")[0] if "/" in line else "(root files)"] += 1
-        text = report(old, new, changes, patch_section(touched, patched, {path: git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", path).splitlines() for _, path in touched}) + other_counts(rest), notes)  # type: ignore[arg-type]
+        app_titles = git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", "apps/").splitlines()
+        patch_titles = git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", *[p for _, p in touched]).splitlines() if touched else []
+        summary = ["## Fixes and features", "", split_counts("apps/", app_titles), split_counts("files our patches touch", patch_titles),
+                   "", "Fixes are listed first everywhere below. A title counts as a fix when it says fix, bug, security, crash, regression, leak or revert.", ""]
+        text = report(old, new, changes, summary + patch_section(touched, patched, {path: git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", path).splitlines() for _, path in touched}) + other_counts(rest), notes)  # type: ignore[arg-type]
         changed = bool(changes) or bool(touched)
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8", newline="\n")

@@ -72,6 +72,7 @@ class PatchOverlapTest(unittest.TestCase):
         text = "\n".join(u.patch_section([("M", "apps/api/a.ts"), ("M", "apps/web/b.ts")], patched))
         self.assertIn("  - apps/api/a.ts (changed)", text)
         withc = "\n".join(u.patch_section([("M", "apps/api/a.ts")], patched, {"apps/api/a.ts": ["Add pool option (#1)"]}))
-        self.assertIn("    - Add pool option (#1)", withc)
+        self.assertIn("    - [feature] Add pool option (#1)", withc)
+        self.assertEqual(u.fixes_first(["Add x", "fix(api): y"]), ["[fix] fix(api): y", "[feature] Add x"])
         self.assertNotIn("apps/web/b.ts", text)
         self.assertIn("No upstream change", "\n".join(u.patch_section([], patched)))
