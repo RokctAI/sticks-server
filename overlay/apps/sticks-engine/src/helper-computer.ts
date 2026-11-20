@@ -3,6 +3,7 @@
 // helper runs it as user `sticks`, inside the Stick's own folder, with its minimal environment. No Docker
 // socket and no supervisor are involved. It reports graphical: false (inherited).
 import { createConnection } from "node:net";
+import { liveScripts } from "./activity.js";
 import { DesktopSandboxProvider } from "../../../packages/adapters/src/desktop-sandbox.ts";
 import type {
   AdapterContext,
@@ -23,6 +24,11 @@ let counter = 0;
 
 /** Sends one request to the helper and resolves with its result. Rejects on an error reply or a timeout. */
 export function sendToHelper(socketPath: string, body: SandboxBody, timeoutMs = 130_000): Promise<unknown> {
+  // Each command the engine waits on counts as a live script for idle (spec 7.6).
+  return liveScripts.track(() => sendOnce(socketPath, body, timeoutMs));
+}
+
+function sendOnce(socketPath: string, body: SandboxBody, timeoutMs: number): Promise<unknown> {
   const id = `${Date.now()}-${++counter}`;
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
