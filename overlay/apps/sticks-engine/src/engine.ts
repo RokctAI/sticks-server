@@ -17,6 +17,7 @@ import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, 
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
 import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
+import { socketEngram } from "./end-of-day-adapters.js";
 import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
@@ -107,12 +108,16 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // runtime) and the Engram write (Pulsar side) are not connected yet, so a day fails with a clear error
   // (logged by onError) and the next day still runs.
   const offset = tzOffsetFromEnv(env);
+  // The Pulsar unix socket (credits, Engram) and the per-tenant engine secret.
+  const pulsarSocket = env.STICKS_PULSAR_SOCKET?.trim();
+  const creditsSecret = engineSecretFrom(dir);
   const scheduler = startBootScheduler({
     prisma: handles.prisma,
     jobs: handles.jobs,
     endOfDay: endOfDayHookFromEnv(
       env,
       engineEndOfDayDeps({
+        ...(pulsarSocket && creditsSecret ? { engram: socketEngram(pulsarSocket, creditsSecret, env.STICKS_TENANT?.trim() ?? "") } : {}),
         activeChats: (day) =>
           handles.prisma.thread.findMany({ where: activeChatsWhere(day, offset), select: { id: true }, take: 500 }),
         readThread: (threadId) =>
@@ -152,8 +157,6 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   });
 
   // Credits (brief task 12): settle runs a crash left unsettled. Runs reserve and settle through pulsar-credits.ts.
-  const pulsarSocket = env.STICKS_PULSAR_SOCKET?.trim();
-  const creditsSecret = engineSecretFrom(dir);
   if (pulsarSocket && creditsSecret) {
     await settleLeftovers(socketTransport(pulsarSocket, creditsSecret), sql)
       .then((n) => n && console.log(JSON.stringify({ msg: "settled runs left unsettled", count: n })))
