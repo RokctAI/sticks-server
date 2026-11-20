@@ -12,6 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
+import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
@@ -118,6 +119,31 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     onError: (error) => logger.error("boot scheduler error (boot pass or end of day)", error),
   });
   await scheduler.ready;
+
+  // Settings from Pulsar (brief task 11): stored settings first, then a pull from STICKS_SETTINGS_URL when set.
+  // A failed pull keeps the stored settings. Pulsar also pushes changes to POST /internal/settings.
+  const settings = new SettingsStore(sql);
+  await settings.load();
+  const settingsUrl = env.STICKS_SETTINGS_URL?.trim();
+  if (settingsUrl) {
+    const secret = engineSecretFrom(dir);
+    if (secret) {
+      await pullSettings(settingsUrl, secret)
+        .then((payload) => settings.update(payload))
+        .catch((error) => logger.error("settings pull failed; keeping the stored settings", error));
+    }
+  }
+  handles.app.post("/internal/settings", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (!secret) return c.json({ error: "engine secret not provisioned" }, 503);
+    if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    try {
+      return c.json(await settings.update(await c.req.json()));
+    } catch (error) {
+      if (error instanceof SettingsError || error instanceof SyntaxError) return c.json({ error: error.message }, 400);
+      throw error;
+    }
+  });
 
   // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
   // Open streams and live scripts are not counted yet (no hook in upstream), so the tenant is never
