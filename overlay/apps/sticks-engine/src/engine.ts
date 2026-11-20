@@ -11,6 +11,7 @@ import { helperSandboxFromEnv } from "./helper-computer.js";
 import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
+import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
@@ -80,6 +81,18 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // Guest sign-ins are recorded here (brief task 9): the front door lets them only read.
   await handles.prisma.$queryRawUnsafe(GUEST_TABLE_SQL);
 
+  // First boot (brief task 10): the tenant's one organization and space, named after the company, and the
+  // default block in every active Stick. The block is re-applied every 15 minutes, so a new Stick or one
+  // whose block was edited away gets it back (scripts/apply_stick_defaults.py ran nightly before).
+  const sql = async (text: string, values: unknown[] = []) => handles.prisma.$queryRawUnsafe<unknown[]>(text, ...values);
+  const company = env.STICKS_COMPANY_NAME?.trim();
+  if (company) await ensureTenantSpace(sql, company);
+  const applyDefaults = () =>
+    applyStickDefaults(sql).catch((error) => logger.error("stick defaults failed", error));
+  await applyDefaults();
+  const defaultsTimer = setInterval(() => void applyDefaults(), 15 * 60_000);
+  defaultsTimer.unref();
+
   // Recover what a restart lost, before anything serves (spec 7.6, brief task 7). The one timer for
   // the nearest due item is held by the scheduler; stop() clears it before upstream shuts down.
   // The end-of-day job (brief task 18) is held in the scheduler's one timer when STICKS_END_OF_DAY is set.
@@ -134,6 +147,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     ...handles,
     stop: async () => {
       scheduler.stop();
+      clearInterval(defaultsTimer);
       await stopUpstream();
     },
   };
