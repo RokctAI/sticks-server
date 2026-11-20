@@ -6,6 +6,7 @@
 //   - engramRemember: writes the facts to Engram through a transport. The Pulsar side is not built, so the
 //     transport is injected; the engine's default throws "not connected".
 // Upstream's own clear (events.ts) deletes messages, so it is NOT used here.
+import { request } from "node:http";
 import type { EndOfDayDeps } from "./end-of-day.js";
 
 /** The UTC instants where the local day `day` (YYYY-MM-DD in a zone at `offsetMinutes` from UTC) starts and ends. */
@@ -60,6 +61,50 @@ export function notConnectedEngram(): EngramTransport {
       throw new Error("end of day: Engram write through Pulsar is not connected yet");
     },
   };
+}
+
+/**
+ * Engram write over the Pulsar unix socket (STICKS_PULSAR_SOCKET) with the engine secret:
+ * POST /engram/remember {tenant, chat, day, facts}. Any answer other than {ok: true} is a failure, so the chat's
+ * working context is kept and the write is tried again next time.
+ */
+export function socketEngram(
+  socketPath: string,
+  secret: string,
+  tenant: string,
+  post: (socketPath: string, path: string, secret: string, body: unknown) => Promise<{ ok?: boolean; reason?: string }> = pulsarPost,
+): EngramTransport {
+  return {
+    remember: async ({ chatId, day, facts }) => {
+      const r = await post(socketPath, "/engram/remember", secret, { tenant, chat: chatId, day, facts });
+      if (r.ok !== true) throw new Error(`end of day: Engram refused the write: ${r.reason ?? "no reason"}`);
+    },
+  };
+}
+
+/** One JSON POST to Pulsar over its unix socket. */
+export function pulsarPost(socketPath: string, path: string, secret: string, body: unknown, timeoutMs = 20_000): Promise<{ ok?: boolean; reason?: string }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = request(
+      { socketPath, path, method: "POST", timeout: timeoutMs, headers: { "content-type": "application/json", authorization: `Bearer ${secret}`, "content-length": Buffer.byteLength(payload) } },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (text += c));
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(text) as { ok?: boolean; reason?: string });
+          } catch {
+            reject(new Error(`pulsar answered HTTP ${res.statusCode} without JSON`));
+          }
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("pulsar call timed out")));
+    req.on("error", reject);
+    req.end(payload);
+  });
 }
 
 /**

@@ -2,7 +2,7 @@
 // from the environment: STICKS_END_OF_DAY ("HH:MM", the tenant's local time) and STICKS_TZ_OFFSET_MINUTES
 // (the zone's offset from UTC, east positive, default 0). Unset STICKS_END_OF_DAY means no daily job.
 import { dayEndingAt, nextEndOfDayAt, runEndOfDay, type EndOfDayDeps, type EndOfDayResult } from "./end-of-day.js";
-import { endOfDayDeps, notConnectedEngram, type ThreadCursor } from "./end-of-day-adapters.js";
+import { endOfDayDeps, notConnectedEngram, type EngramTransport, type ThreadCursor } from "./end-of-day-adapters.js";
 
 /** The zone offset from the environment (STICKS_TZ_OFFSET_MINUTES), validated. Default 0. */
 export function tzOffsetFromEnv(env: NodeJS.ProcessEnv): number {
@@ -22,6 +22,8 @@ export function tzOffsetFromEnv(env: NodeJS.ProcessEnv): number {
 export function engineEndOfDayDeps(options: {
   activeChats: (day: string) => Promise<{ id: string }[]>;
   readThread: (threadId: string) => Promise<ThreadCursor>;
+  /** Pulsar's Engram write; when missing, every write fails and contexts are kept. */
+  engram?: EngramTransport;
 }): EndOfDayDeps {
   return endOfDayDeps({
     activeChats: options.activeChats,
@@ -31,7 +33,7 @@ export function engineEndOfDayDeps(options: {
       );
     },
     readThread: options.readThread,
-    engram: notConnectedEngram(),
+    engram: options.engram ?? notConnectedEngram(),
   });
 }
 

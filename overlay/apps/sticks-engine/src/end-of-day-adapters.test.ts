@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeChatsWhere,
+  socketEngram,
   compactThroughEnd,
   dayBoundsUtc,
   endOfDayDeps,
@@ -108,5 +109,16 @@ describe("activeChatsWhere: the query's day bounds", () => {
         },
       },
     });
+  });
+});
+
+describe("Engram over the Pulsar socket (task 18)", () => {
+  it("sends tenant, chat, day and facts, and fails unless Pulsar says ok", async () => {
+    const sent: unknown[] = [];
+    const ok = socketEngram("/s", "secret", "t1", async (_s, path, _k, body) => (sent.push([path, body]), { ok: true }));
+    await ok.remember({ chatId: "c1", day: "2026-11-20", facts: "likes tea" });
+    expect(sent).toEqual([["/engram/remember", { tenant: "t1", chat: "c1", day: "2026-11-20", facts: "likes tea" }]]);
+    const no = socketEngram("/s", "secret", "t1", async () => ({ ok: false, reason: "engram down" }));
+    await expect(no.remember({ chatId: "c1", day: "d", facts: "f" })).rejects.toThrow("engram down");
   });
 });
