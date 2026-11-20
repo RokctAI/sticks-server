@@ -69,13 +69,35 @@ engine's `sticks_guest` table at sign-in.
   Password, emailed code, passkey, SSO and sign-up are therefore unreachable.
 - The engine needs `STICKS_TENANT` (the tenant id in tokens) and `STICKS_TENANT_SITE` (the sender id).
 
-## 4. Later sections (not yet written)
+## 4. Settings from Pulsar (task 11, built)
 
-- Settings from Pulsar (task 11): `POST /internal/settings`.
+- Push: `POST /internal/settings` with `Authorization: Bearer <engine secret>` (`/run/secrets/engine_secret`).
+- Pull: at boot, `GET ${STICKS_SETTINGS_URL}` with the same bearer, when the variable is set. A failed pull keeps the stored settings.
+- Body (snake_case; every field optional; unknown fields are refused with 400):
+
+```json
+{
+  "settings": {
+    "default_model": "openai/gpt-oss-120b",
+    "approvals": "ask_writes | ask_all | never",
+    "sleep_delay_seconds": 600,
+    "browser_allowed": false,
+    "home_quota_mb": 1024,
+    "keep_going": { "enabled": true, "max_no_progress": 3, "max_per_day": 20, "gap_seconds": 60 }
+  },
+  "hub_settings": { "limits": { "sleep_delay_seconds": 900, "home_quota_mb": 2048, "browser_allowed": false, "keep_going_max_per_day": 20 } }
+}
+```
+
+- Hub limits win: each limited number is capped, and `browser_allowed: false` in the limits turns the browser off.
+- The answer is the effective settings. They are stored in the engine's `sticks_settings` table.
+
+## 5. Later sections (not yet written)
+
 - Credits from Pulsar (task 12): `credits.reserve`, `credits.extend`, `credits.settle`.
 - Engram (task 18): the end-of-day memory call, section 5.
 
-## 5. Engram: the end-of-day memory call (task 18; Pulsar side not built)
+## 6. Engram: the end-of-day memory call (task 18; Pulsar side not built)
 
 Once a day per tenant the engine summarises each chat active that day, writes the lasting facts to Engram
 through Pulsar, then clears that chat's working context. The job is held in `next_wake_at` (spec 7.6); it
