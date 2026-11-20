@@ -60,7 +60,8 @@ def patched_files(patches_dir: Path) -> dict[str, list[str]]:
     return dict(out)
 
 
-def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]]) -> list[str]:
+def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]],
+                  commits: dict[str, list[str]] | None = None) -> list[str]:
     """Repo-wide: per patch, the files it touches that changed upstream. A patch that still applies can still need a look."""
     per: dict[str, list[str]] = collections.defaultdict(list)
     for status, path in touched:
@@ -70,8 +71,12 @@ def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]])
     if not per:
         return lines + ["No upstream change touches a file in patches/.", ""]
     for name in sorted(per):
-        lines.append(f"- **{name}**: {', '.join(per[name])}")
-    return lines + ["", "Re-read these patches before repinning, even if they still apply.", ""]
+        lines.append(f"- **{name}**")
+        for entry in per[name]:
+            lines.append(f"  - {entry}")
+            for title in (commits or {}).get(entry.split(" (")[0], []):
+                lines.append(f"    - {title}")
+    return lines + ["", "Read each upstream commit above: upstream may now do what our patch does (duplicate work, even with no conflict).", ""]
 
 
 def other_counts(counts: dict[str, int]) -> list[str]:
@@ -134,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         rest: dict[str, int] = collections.Counter()
         for line in git(a.repo, "diff", "--name-only", "--no-renames", old, new, "--", ".", ":(exclude)apps/").splitlines():
             rest[line.split("/")[0] if "/" in line else "(root files)"] += 1
-        text = report(old, new, changes, patch_section(touched, patched) + other_counts(rest), notes)  # type: ignore[arg-type]
+        text = report(old, new, changes, patch_section(touched, patched, {path: git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", path).splitlines() for _, path in touched}) + other_counts(rest), notes)  # type: ignore[arg-type]
         changed = bool(changes) or bool(touched)
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8", newline="\n")
