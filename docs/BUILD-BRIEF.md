@@ -410,10 +410,11 @@ Settled decisions:
 5. The tenant-facing text is plain language with no technical terms.
 6. The connection step is guided in the app, and credentials never reach the model or chat.
 
-### Task 25: Pulsar sign-in as an SDK (owner's note 11-15, recorded 11-20; after task 9 merges)
-- Sticks signs users in with a short-lived token signed by Pulsar (`overlay/apps/sticks-engine/src/pulsar-token.ts` verifies it; `pulsar-session.ts` and `pulsar-front.ts` turn it into a session). Gravity needs the same sign-in.
-- Move the token part (envelope parsing, canonical JSON, ed25519 check, skew, replay cache, role map hook) into a small shared "Pulsar sign-in" SDK with a TypeScript and a Python side, next to the other SDKs, with the same test vectors on both sides.
-- The engine then imports it instead of its own copy. The session part (upstream session rows, closed routes, guests) stays in the engine: it is Rakazo-specific.
+### Task 25: hub sign-in token as a small standalone SDK (owner's note 11-15, reworded 11-20; after task 9 merges)
+- Sticks signs users in with a short-lived token signed by the hub (`overlay/apps/sticks-engine/src/pulsar-token.ts` verifies it; `pulsar-session.ts` and `pulsar-front.ts` turn it into a session). Gravity needs the same sign-in, and Gravity is neither Frappe nor Pulsar.
+- So the SDK is backend-agnostic: pure verification with no Frappe, Pulsar or network calls. Input: the token (Bearer value) plus the hub's public key, the expected sender, the app's tenant id and the clock. Output: `{user, role, tenant, exp}` or a coded error (malformed, bad_signature, stale, replay, expired, wrong_tenant, unknown_role). It also ships the replay cache. Role names are passed in by the app, not fixed.
+- One TypeScript and one Python package, with the same test vectors on both sides. The engine then imports it instead of its own copy.
+- What stays in each app: turning the verified user into that app's own session (for Sticks: upstream session rows, closed routes, guests).
 
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
