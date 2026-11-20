@@ -25,6 +25,9 @@ USER_AGENT = "sticks-live-check/1.0"
 TOOL_CHECK_MODELS = 10
 # Models that are not chat models (speech, guards, embeddings, text-to-speech).
 NOT_CHAT = re.compile(r"whisper|orpheus|guard|safeguard|embed|tts|speech|vision", re.IGNORECASE)
+# Models whose live run answered HTTP 400 "`tool calling` is not supported with this model". They are not
+# tested for tool calls again. Add a model here only when a run shows that exact refusal.
+NO_TOOL_CALLING = frozenset({"allam-2-7b"})
 
 TOOL = {
     "type": "function",
@@ -93,7 +96,7 @@ class GroqModels(unittest.TestCase):
 @unittest.skipUnless(KEY, "GROQ_API_KEY is not set: the live checks are skipped")
 class GroqToolUse(unittest.TestCase):
     def test_largest_chat_models_call_the_tool_with_schema_valid_arguments(self):
-        models = [m["id"] for m in chat_models()[:TOOL_CHECK_MODELS]]
+        models = [m["id"] for m in chat_models() if m["id"] not in NO_TOOL_CALLING][:TOOL_CHECK_MODELS]
         self.assertTrue(models, "no chat model to check")
         for model in models:
             with self.subTest(model=model):

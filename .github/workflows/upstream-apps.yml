@@ -1,0 +1,45 @@
+# Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
+# ("upstream" in the Sticks app's version.json, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
+name: Upstream apps changes
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  apps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone upstream (history and tags, no file contents beyond what the diff needs)
+        run: git clone --quiet --filter=blob:none --no-checkout https://github.com/elie222/rakazo.git upstream
+      - name: List the changes
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.MONOREPO_PAT }}
+        run: |
+          set +e
+          python3 scripts/upstream_app_changes.py --repo upstream --out report.md
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the report (90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-apps-report
+          path: report.md
+          retention-days: 90
+      - name: Open or update the tracking issue
+        if: steps.diff.outputs.code == '10'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream apps changed since $(head -1 report.md | sed 's/^# Upstream apps: //; s/ to .*//')"
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then gh issue edit "$number" --body-file report.md
+          else gh issue create --title "$title" --body-file report.md; fi
+      - name: Fail on a script error
+        if: steps.diff.outputs.code != '0' && steps.diff.outputs.code != '10'
+        run: exit 1

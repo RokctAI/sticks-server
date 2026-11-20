@@ -22,6 +22,9 @@ jobs:
         run: corepack enable
       - name: Check upstream (and build our overlay on a newer tag)
         id: sync
+        env:
+          # Reads "upstream" from the Sticks app's version.json (private repo); without it the pin never moves.
+          GH_TOKEN: ${{ secrets.MONOREPO_PAT }}
         run: |
           set +e
           python3 scripts/sync_upstream.py --write-pin --report report.md

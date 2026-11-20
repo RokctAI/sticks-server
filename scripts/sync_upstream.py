@@ -29,6 +29,7 @@ import datetime as dt
 import json
 import re
 import shutil
+import os
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,44 @@ def read_pin(path: Path) -> dict[str, str]:
 
 def parse_series(text: str) -> list[str]:
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+
+
+# The Sticks app records the upstream release it has caught up with in its own version.json ("upstream": "vX.Y.Z").
+# The pin may only move to a release the app has reached. Read with GH_TOKEN (the app repo is private);
+# any failure reads as "not reviewed", so the pin never moves on a guess.
+PARITY_REPO, PARITY_PATH, PARITY_REF = "RokctAI/sticks", "version.json", "main"
+
+
+def parse_parity(text: str) -> str:
+    """The manifest's top-level "upstream" field, when it is a release tag; otherwise ""."""
+    try:
+        value = json.loads(text).get("upstream", "")
+    except (ValueError, AttributeError):
+        return ""
+    return value if isinstance(value, str) and re.fullmatch(r"v\d+\.\d+\.\d+", value) else ""
+
+
+def reviewed_tag(path: Path | None = None) -> str:
+    """The upstream release the Sticks app has caught up with, or "" when it cannot be read."""
+    local = path or (Path(os.environ["STICKS_PARITY_FILE"]) if os.environ.get("STICKS_PARITY_FILE") else None)
+    if local is not None:
+        return parse_parity(local.read_text(encoding="utf-8")) if local.is_file() else ""
+    url = f"https://api.github.com/repos/{PARITY_REPO}/contents/{PARITY_PATH}?ref={PARITY_REF}"
+    headers = {"Accept": "application/vnd.github.raw", "User-Agent": "sticks-server-ci"}
+    token = os.environ.get("GH_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as r:
+            return parse_parity(r.read().decode("utf-8"))
+    except Exception:
+        return ""
+
+
+def app_reviewed_for(tag: str, path: Path | None = None) -> bool:
+    """The pin may move to `tag` only once the app has caught up with that release or a later one."""
+    want, have = tag_key(tag), tag_key(reviewed_tag(path))
+    return want is not None and have is not None and have >= want
 
 
 def tag_key(tag: str) -> tuple[int, int, int] | None:
@@ -507,7 +546,15 @@ def main() -> int:
         if code == 10:
             status, result = "NEWER TAG READY", f"`{new_tag}` is newer than `{pinned}` and our patches and contract check pass."
             steps = "Open a DRAFT PR moving the pin (the robot does this), test on a test instance, then let the gatekeeper review."
-            if args.write_pin:
+            if args.write_pin and not app_reviewed_for(new_tag):
+                code = 2
+                status, result = "NOT READY", (
+                    f"`{new_tag}` passes our checks but the pin was NOT written: the Sticks app is not yet marked "
+                    f"updated for it (its version.json \"upstream\" is `{reviewed_tag() or 'unreadable'}`)."
+                )
+                steps = ("Read the upstream apps report (Upstream apps changes workflow), update the Sticks app, and set "
+                         f"\"upstream\": \"{new_tag}\" in {PARITY_REPO}:{PARITY_PATH} in that app PR; then re-run.")
+            elif args.write_pin:
                 try:
                     write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
                 except RuntimeError as exc:
