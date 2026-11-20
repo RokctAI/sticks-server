@@ -56,3 +56,23 @@ class RepinGate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PatchOverlapTest(unittest.TestCase):
+    def test_flags_changed_files_that_a_patch_touches(self):
+        import tempfile
+        from pathlib import Path
+
+        import scripts.upstream_app_changes as u
+
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "0001-x.patch").write_text("--- a/apps/api/a.ts\n+++ b/apps/api/a.ts\n@@\n", encoding="utf-8")
+            patched = u.patched_files(Path(d))
+        self.assertEqual(patched, {"apps/api/a.ts": ["0001-x.patch"]})
+        text = "\n".join(u.patch_section([("M", "apps/api/a.ts"), ("M", "apps/web/b.ts")], patched))
+        self.assertIn("  - apps/api/a.ts (changed)", text)
+        withc = "\n".join(u.patch_section([("M", "apps/api/a.ts")], patched, {"apps/api/a.ts": ["Add pool option (#1)"]}))
+        self.assertIn("    - [feature] Add pool option (#1)", withc)
+        self.assertEqual(u.fixes_first(["Add x", "fix(api): y"]), ["[fix] fix(api): y", "[feature] Add x"])
+        self.assertNotIn("apps/web/b.ts", text)
+        self.assertIn("No upstream change", "\n".join(u.patch_section([], patched)))

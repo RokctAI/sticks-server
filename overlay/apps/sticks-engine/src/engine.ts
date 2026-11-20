@@ -13,6 +13,10 @@ import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
+import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
+import { sqlDraftRepository } from "./plugin-draft-store.js";
+import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
@@ -144,6 +148,50 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       throw error;
     }
   });
+
+  // Hub onboarding (control#204): only when STICKS_HUB_ONBOARDING=1. The chat page hands over the tenant's
+  // onboarding token once (signed-in, not a guest); the plugin's three tools call the proxy routes, which add
+  // the token. Callers must be signed in (any member) or hold the engine secret.
+  const onboarding = onboardingEnabled(env);
+  if (onboarding) {
+    const signedIn = async (headers: Headers) => {
+      const raw = sessionTokenFrom(headers);
+      if (!raw) return false;
+      const rows = (await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[];
+      return rows.length > 0 && !(await isGuestSession(sql, raw));
+    };
+    await seedBuiltinPlugin(sqlDraftRepository(sql), "hub-onboarding", onboardingPluginDocument(onboarding.engineUrl));
+    const fail = (c: { json: (b: unknown, s: number) => Response }, error: unknown) => {
+      if (error instanceof OnboardingError) return c.json({ error: error.message }, error.status);
+      if (error instanceof SyntaxError) return c.json({ error: "body must be JSON" }, 400);
+      throw error;
+    };
+    handles.app.post("/internal/onboarding/token", async (c) => {
+      if (!(await signedIn(c.req.raw.headers))) return c.json({ error: "sign in first" }, 401);
+      try {
+        const body = (await c.req.json()) as { onboarding_token?: unknown };
+        await saveOnboardingToken(sql, body?.onboarding_token);
+        return c.json({ ok: true });
+      } catch (error) {
+        return fail(c as never, error);
+      }
+    });
+    for (const tool of ["state", "save-answer", "finish"] as OnboardingTool[]) {
+      handles.app.post(`/internal/onboarding/${tool}`, async (c) => {
+        const secret = engineSecretFrom(dir);
+        const bySecret = secret !== undefined && bearerMatches(c.req.header("authorization"), secret);
+        if (!bySecret && !(await signedIn(c.req.raw.headers))) return c.json({ error: "unauthorized" }, 401);
+        const token = await readOnboardingToken(sql);
+        if (!token) return c.json({ error: "onboarding has not started: no onboarding token yet" }, 409);
+        try {
+          const text = await c.req.text();
+          return c.json({ result: await callHub(onboarding.hubUrl, token, tool, text ? JSON.parse(text) : {}) });
+        } catch (error) {
+          return fail(c as never, error);
+        }
+      });
+    }
+  }
 
   // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
   // Open streams and live scripts are not counted yet (no hook in upstream), so the tenant is never
