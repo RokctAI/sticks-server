@@ -49,9 +49,31 @@ def summarise(changes: list[tuple[str, str]]) -> dict[str, collections.Counter]:
     return out
 
 
-def report(old: str, new: str, changes: list[tuple[str, str]]) -> str:
+def patched_files(patches_dir: Path) -> dict[str, list[str]]:
+    """Upstream files our patches touch: path -> patch names (from the patches' +++/--- headers)."""
+    out: dict[str, list[str]] = collections.defaultdict(list)
+    for patch in sorted(patches_dir.glob("*.patch")):
+        for line in patch.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^(?:\+\+\+|---) [ab]/(\S+)", line)
+            if m and patch.name not in out[m.group(1)]:
+                out[m.group(1)].append(patch.name)
+    return dict(out)
+
+
+def patch_section(touched: list[tuple[str, str]], patched: dict[str, list[str]]) -> list[str]:
+    """Upstream changes to files a patch touches. A patch that still applies can still need a second look."""
+    hits = [(status, path) for status, path in touched if path in patched]
+    lines = ["## Files our patches touch", ""]
+    if not hits:
+        return lines + ["No upstream change touches a file in patches/.", ""]
+    lines += [f"{len(hits)} patched file(s) changed upstream. Re-read these patches before repinning, even if they still apply.", "", "| File | Change | Patches |", "|---|---|---|"]
+    lines += [f"| {path} | {status} | {', '.join(patched[path])} |" for status, path in hits]
+    return lines + [""]
+
+
+def report(old: str, new: str, changes: list[tuple[str, str]], patch_lines: list[str] | None = None) -> str:
     if not changes:
-        return f"# Upstream apps: {old} to {new}\n\nNo file under apps/ changed.\n"
+        return f"# Upstream apps: {old} to {new}\n\nNo file under apps/ changed.\n\n" + "\n".join(patch_lines or [])
     groups = summarise(changes)
     lines = [f"# Upstream apps: {old} to {new}", "", f"{len(changes)} files changed under apps/.", ""]
     for app in sorted(groups, key=lambda a: (APP_ORDER.index(a) if a in APP_ORDER else 99, a)):
@@ -60,6 +82,7 @@ def report(old: str, new: str, changes: list[tuple[str, str]]) -> str:
         for area, n in groups[app].most_common():
             lines.append(f"| {area} | {n} |")
         lines.append("")
+    lines += patch_lines or []
     lines += [f"The pin moves to {new} only after the Sticks app PR that catches up sets \"upstream\": \"{new}\" in its version.json."]
     return "\n".join(lines) + "\n"
 
@@ -88,8 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         raw = git(a.repo, "diff", "--name-status", "--no-renames", old, new, "--", "apps/")
         changes = [tuple(line.split("\t", 1)) for line in raw.splitlines() if "\t" in line]
-        text = report(old, new, changes)  # type: ignore[arg-type]
-        changed = bool(changes)
+        patched = patched_files(ROOT / "patches")
+        touched_raw = git(a.repo, "diff", "--name-status", "--no-renames", old, new, "--", *patched) if patched else ""
+        touched = [tuple(line.split("\t", 1)) for line in touched_raw.splitlines() if "\t" in line]
+        text = report(old, new, changes, patch_section(touched, patched))  # type: ignore[arg-type]
+        changed = bool(changes) or bool(touched)
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8", newline="\n")
     sys.stdout.write(text)
