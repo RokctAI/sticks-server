@@ -5,15 +5,27 @@ Repo: `RokctAI/sticks-server`. Follow this file exactly.
 Task 5b, then 6, 7 and onward, in order. Each task needs the tasks listed in its heading to be merged first.
 
 ## DO THIS NOW (read first; overrides everything below)
-Merged: 8 (#40), 21 (#42, #52), 22 (#41, #53), 9b (#44), 13b (#45, #47, #56), 18 (#46, #48, #49), 16 (#50, #55, #57), 17 image stages (#51). The upstream clone is `~/sticks-upstream` (v0.11.0). Reuse it; never clone again.
+Merged up to #60, see report #38. The upstream clone is `~/sticks-upstream` (v0.11.0). Reuse it; never clone again.
+These answers SETTLE the items report #38 lists as BLOCKED (11-20). Do not re-ask them:
+- **Task 9 session layer:** a verified Pulsar token signs the user in through better-auth's own session creation. The user row is keyed by the Pulsar user id (upsert on each sign-in; email `<user id>@<tenant>.sticks.invalid`, never used to send mail). The session lasts 12 hours; a fresh token renews it. After a test proves this, unmount password, code, passkey and SSO routes. This unblocks tasks 10, 11, 12 and 14.
+- **Guest role:** map `Sticks Guest` to upstream's lowest member role, with tools, runs and memory writes refused by our overlay check.
+- **Task 18 summariser:** two-phase. End-of-day enqueues upstream's `history.compact` job per chat, and finishes the day (remember, clear) when that job completes. No patch exposing memoryProviders. The Engram write keeps its fake until core ships the endpoint; that is core's work, not here.
+- **#40 counts:** add a counter to upstream's stream response handler through a file in `patches/` (count open responses, not subscriptions). Live scripts: the helper records each process group it starts and counts the groups still alive (check with `kill(-pgid, 0)`). Then push on change and the sleeping notice.
+- **#41 boot seeding:** ship the GitHub description as a TypeScript module (an exported object), not a file read through `import.meta.url`, so it survives the esbuild bundle.
+- **#42 skill:** build the plugin-building tool and the request route from the 11-17 update below first, then register the skill with a one-entry patch to upstream's SKILLS list.
+- **Task 17 tenant image:** pin Pulsar by commit in `docker/PULSAR_COMMIT`. CI builds the engine layers only; the Pulsar layer is built where core is reachable. Write the stage now with a build arg.
+- **#50 review note:** `sendToHelper` uses a fixed 130 s timeout. Make it the request's `timeoutMs` plus 10 s, so long commands are not cut off by the client.
 Work list, one draft PR per line, no CI checks between:
-1. Idle follow-up to task 8: count open client streams and live scripts with a small counter, added to upstream's stream and script handlers through `patches/`. Push on every change, using a run-finished hook added the same way. Close idle streams with the "sleeping" notice.
-2. #41 follow-up: call-level tests with a fake connector runtime in vitest (the credential header goes out; a write waits for approval).
-3. Task 17 follow-up: the tenant image stage.
-4. Task 23 (new): the freeze fallback (spec 7.6), using the cold-start number from the Measurements job. If that number is not in a report yet, write BLOCKED.
-5. Task 24 (new): a CI check that every file in `patches/` still applies to v0.11.0 (a patch that no longer applies fails the build).
-6. Small fix: the doc comment on `startHelper` ends "or puts both in one group"; change it to "the runner makes the engine's user the owner".
-7. Write a new report PR (docs/reports/) with the results. Then reply in two lines.
+1. Task 9 session layer (with the Guest mapping).
+2. Tasks 10, 11, 12, 14 in order, each its own PR.
+3. Task 18 summariser (two-phase).
+4. #40 counts, push on change, sleeping notice.
+5. #41 description as a module, and the boot call.
+6. #42 plugin build requests (the 11-17 update below), then the skill registration.
+7. Task 17 tenant image stage.
+8. The `sendToHelper` timeout fix, and the `startHelper` comment ("the runner makes the engine's user the owner").
+9. Task 23 freeze fallback (spec 7.6) once a cold-start number is in a report; task 24 CI check that every `patches/` file applies to v0.11.0.
+10. Append the results to report #38. Then reply in two lines.
 
 ## Rules that matter most
 1. **Nothing runs on this computer except git, editing files and `gh`.**
@@ -366,6 +378,37 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Auth: the user's own GitHub token or GitHub App installation, stored as a connector credential, never sent to the model.
 - Installed and enabled by default in every tenant (still needs the user's token to work).
 - Tests: the plugin loads; a read call goes out with the credential header; a write call asks for approval.
+
+### Update 11-17: plugin build requests (amends tasks 21 and 22; the wording above is kept unchanged)
+Settled 11-20 (the six decisions below are accepted; change them only if the owner says so).
+
+Principle: we build our own plugins and do not depend on third-party connectors. GitHub is the first built-in. The tenant wants a task done; a connector is only the means.
+
+Flow when a Stick needs a service that has no plugin:
+1. The Stick tells the tenant the task needs a connector for that service, and offers to build one. The tenant can agree or decline. Declining ends the request; the Stick does not ask again for the same service unless the tenant asks.
+2. The offer and the approval screen are plain language, for a tenant who is not a developer. They show: the service, why the task needs it, what the Stick will be able to read, what it will change (writes ask each time), and whether a connection is needed. The tenant-facing text does not use terms such as API key, token, OpenAPI or GraphQL.
+3. A tenant admin (`Sticks Admin` role) agrees or declines the request. A Stick cannot approve its own request.
+4. If agreed, the builder (task 21) creates a draft from the service's API documentation. The draft is not callable until it is built.
+5. If the service needs a login, token or key, the Stick guides the tenant through the connection step by step in the app. The credential is entered in the app, stored as a connector credential, and never sent to the model or shown in chat. If the tenant cannot complete it, the request stays open.
+6. Once built, the plugin stays built and callable for that tenant. Each write call still asks for approval through `packages/core/src/action-approval.ts`. No further admin approval is needed per use.
+
+State of a request in `plugin_draft`: requested, declined, agreed (building), built. A request is callable only when built. The connection step is a separate field, so a built plugin can still be waiting for its connection.
+
+GitHub (task 22): built by us and shipped with the engine. Seeded at boot if missing, as an approved team catalog entry, installed and enabled per tenant. It does not go through a tenant build request. The tenant's own token is the connection step.
+
+How this relates to the spec: spec §4.7 step 3 says a tenant admin approves the connector before any Stick can use it. This update puts the admin's approval on the build request, before the connector exists. A built plugin is then usable without a second approval. This is the intended reading of §4.7 step 3.
+
+Tests for task 21 (in addition to the tests above): a request cannot be agreed by the Stick that raised it; a declined request is not rebuilt; a draft cannot be called before it is built; a built plugin with no connection yet cannot be called.
+
+Reviewer: check this update does not regress the wording of tasks 21 and 22 above. That wording is kept unchanged. The one reading that changes is task 21's "the draft is never live until a tenant admin approves it": under this update the admin approves the request, and the draft is still not callable until built. Check the two readings are consistent and that nothing above was dropped.
+
+Settled decisions:
+1. The admin approves the build request, not the draft (changes the reading of §4.7 step 3 and task 21).
+2. A built plugin is callable without a second admin approval; write calls still ask each time.
+3. GitHub is seeded as an approved team entry and needs no tenant build request.
+4. A declined request is not offered again for the same service unless the tenant asks.
+5. The tenant-facing text is plain language with no technical terms.
+6. The connection step is guided in the app, and credentials never reach the model or chat.
 
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
