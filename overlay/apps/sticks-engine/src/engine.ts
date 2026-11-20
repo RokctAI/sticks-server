@@ -16,6 +16,8 @@ import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
+import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
@@ -149,6 +151,15 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     }
   });
 
+  // Credits (brief task 12): settle runs a crash left unsettled. Runs reserve and settle through pulsar-credits.ts.
+  const pulsarSocket = env.STICKS_PULSAR_SOCKET?.trim();
+  const creditsSecret = engineSecretFrom(dir);
+  if (pulsarSocket && creditsSecret) {
+    await settleLeftovers(socketTransport(pulsarSocket, creditsSecret), sql)
+      .then((n) => n && console.log(JSON.stringify({ msg: "settled runs left unsettled", count: n })))
+      .catch((error) => logger.error("credits boot settle failed; will retry next boot", error));
+  }
+
   // Hub onboarding (control#204): only when STICKS_HUB_ONBOARDING=1. The chat page hands over the tenant's
   // onboarding token once (signed-in, not a guest); the plugin's three tools call the proxy routes, which add
   // the token. Callers must be signed in (any member) or hold the engine secret.
@@ -171,7 +182,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       try {
         const body = (await c.req.json()) as { onboarding_token?: unknown };
         await saveOnboardingToken(sql, body?.onboarding_token);
-        return c.json({ ok: true });
+        // The Onboarding Stick is made here, not at boot: a Stick needs an owner, and at boot nobody has signed in.
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const owner = (await sql(`SELECT "userId" FROM session WHERE token = $1 LIMIT 1`, [raw])) as Array<{ userId: string }>;
+        const stickId = owner[0] ? await ensureOnboardingStick(sql, owner[0].userId) : undefined;
+        return c.json({ ok: true, stickId: stickId ?? null });
       } catch (error) {
         return fail(c as never, error);
       }
