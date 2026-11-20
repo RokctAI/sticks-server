@@ -1,5 +1,5 @@
 # Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
-# (TAG= in the Sticks app's UPSTREAM_PARITY file, read with the APP_PARITY_TOKEN secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
+# (TAG= in the Sticks app's UPSTREAM_PARITY file, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
 name: Upstream apps changes
 on:
   schedule:
@@ -19,7 +19,7 @@ jobs:
       - name: List the changes
         id: diff
         env:
-          GH_TOKEN: ${{ secrets.APP_PARITY_TOKEN }}
+          GH_TOKEN: ${{ secrets.MONOREPO_PAT }}
         run: |
           set +e
           python3 scripts/upstream_app_changes.py --repo upstream --out report.md

@@ -24,7 +24,7 @@ jobs:
         id: sync
         env:
           # Reads the Sticks app's UPSTREAM_PARITY (private repo); without it the pin never moves.
-          GH_TOKEN: ${{ secrets.APP_PARITY_TOKEN }}
+          GH_TOKEN: ${{ secrets.MONOREPO_PAT }}
         run: |
           set +e
           python3 scripts/sync_upstream.py --write-pin --report report.md
