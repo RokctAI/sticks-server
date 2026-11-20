@@ -410,5 +410,10 @@ Settled decisions:
 5. The tenant-facing text is plain language with no technical terms.
 6. The connection step is guided in the app, and credentials never reach the model or chat.
 
+### Task 25: Pulsar sign-in as an SDK (owner's note 11-15, recorded 11-20; after task 9 merges)
+- Sticks signs users in with a short-lived token signed by Pulsar (`overlay/apps/sticks-engine/src/pulsar-token.ts` verifies it; `pulsar-session.ts` and `pulsar-front.ts` turn it into a session). Gravity needs the same sign-in.
+- Move the token part (envelope parsing, canonical JSON, ed25519 check, skew, replay cache, role map hook) into a small shared "Pulsar sign-in" SDK with a TypeScript and a Python side, next to the other SDKs, with the same test vectors on both sides.
+- The engine then imports it instead of its own copy. The session part (upstream session rows, closed routes, guests) stays in the engine: it is Rakazo-specific.
+
 ## When you are done with all of them
 Reply to the owner with one line per PR: the number, the title, and merged / open / blocked.
