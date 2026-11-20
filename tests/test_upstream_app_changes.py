@@ -15,9 +15,9 @@ class UpstreamAppChanges(unittest.TestCase):
         changes = [("M", "apps/mobile/lib/thread/a.ts"), ("A", "apps/mobile/lib/thread/b.ts"),
                    ("M", "apps/web/src/x/y.ts"), ("D", "apps/mobile/app.json")]
         groups = m.summarise(changes)
-        self.assertEqual(groups["mobile"]["lib/thread"], 2)
-        self.assertEqual(groups["mobile"]["(app root)"], 1)
-        self.assertEqual(groups["web"]["src/x"], 1)
+        self.assertEqual(groups["apps/mobile"]["lib/thread"], 2)
+        self.assertEqual(groups["apps/mobile"]["(app root)"], 1)
+        self.assertEqual(groups["apps/web"]["src/x"], 1)
         text = m.report("v1.0.0", "v1.1.0", changes)
         self.assertLess(text.index("apps/mobile"), text.index("apps/web"))
 
