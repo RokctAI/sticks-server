@@ -4,8 +4,8 @@
 // It writes only when the plugin is missing, so a restart never overwrites a stored plugin.
 //
 // Not done here (BLOCKED, see the PR): upstream's installed-connector record. The PR for #41 found no upstream
-// seeding hook for installed connectors, so this seeds the engine's own table only. The boot call is also not
-// wired: the description must be reachable inside the esbuild bundle, which import.meta.url does not provide.
+// seeding hook for installed connectors, so this seeds the engine's own table only. The boot call is in engine.ts,
+// with the description embedded in github-plugin-document.ts (the bundle cannot read files).
 import { draftFromOpenApi, type DraftPlugin } from "./plugin-builder.js";
 import type { DraftRepository } from "./plugin-draft-store.js";
 
