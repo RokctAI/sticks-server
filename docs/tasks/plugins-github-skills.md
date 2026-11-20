@@ -1,11 +1,9 @@
-# GitHub plugin module, plugin build requests, skills
+# Plugin build requests and skills
 
-Status: not started (draft PR holds the task and notes).
+Status: GitHub plugin seeding is done (built-in, seeded at boot from github-plugin-document.ts).
 
-## What to do
+## Still to do
 
-plugin-seed.ts can seed a built-in plugin but the GitHub description is not reachable in the bundle: move it into a TypeScript module and call seedBuiltinPlugin at boot (like hub-onboarding in engine.ts). Then: plugin build requests (bots build a plugin when none exists; admin approves; decisions settled in #63) and skill registration.
-
-## Rules
-
-One PR per task off main, no stacking. Raw SQL tables; no secrets, model names or personal names (public repo). Tests in overlay vitest or tests/ (Python).
+- Plugin build requests: a bot builds a plugin when none exists, and an admin approves it. The decisions were settled in #63; the pieces are plugin-builder.ts, plugin-draft-store.ts and callGateForStored.
+- Skill registration.
+- Upstream's installed-connector record (there is no seeding hook at v0.11.0). Revisit on the v0.13.0 repin.

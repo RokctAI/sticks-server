@@ -16,6 +16,7 @@ import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { GITHUB_PLUGIN_DOCUMENT, GITHUB_PLUGIN_NAME } from "./github-plugin-document.js";
 import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
 import { socketEngram } from "./end-of-day-adapters.js";
 import { ensureOnboardingStick } from "./onboarding-stick.js";
@@ -87,6 +88,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
 
   // The engine's own plugin draft table (brief task 21): created if missing, on every start.
   await ensurePluginDraftTable(async (sql, values = []) => handles.prisma.$queryRawUnsafe<unknown[]>(sql, ...values));
+  // The built-in GitHub plugin (brief task 22): stored as approved if missing; never overwrites a stored one.
+  await seedBuiltinPlugin(sqlDraftRepository(async (q, v = []) => handles.prisma.$queryRawUnsafe<unknown[]>(q, ...v)), GITHUB_PLUGIN_NAME, GITHUB_PLUGIN_DOCUMENT);
   // Guest sign-ins are recorded here (brief task 9): the front door lets them only read.
   await handles.prisma.$queryRawUnsafe(GUEST_TABLE_SQL);
 
