@@ -13,6 +13,7 @@ import type {
   ProcessEvent,
 } from "../../../packages/adapter-kit/src/index.ts";
 import type { CommandResult, SandboxRequest } from "../sandbox/helper.js";
+import { COMMAND_LIMITS } from "../sandbox/policy.js";
 
 /** A request without its id: the client adds one. Distributes over the union. */
 type Body<T> = T extends { id: string } ? Omit<T, "id"> : never;
@@ -62,6 +63,15 @@ export function sendToHelper(socketPath: string, body: SandboxBody, timeoutMs = 
   });
 }
 
+/**
+ * How long the client waits for an exec reply: the helper's own limit for this command plus a 10 s grace,
+ * so a long command is never cut off by the client before the helper answers.
+ */
+export function clientTimeoutFor(requestedMs: number | undefined): number {
+  const helperMs = Math.min(Math.max(requestedMs ?? COMMAND_LIMITS.timeoutMs, 1), COMMAND_LIMITS.maxTimeoutMs);
+  return helperMs + 10_000;
+}
+
 /** POSIX single-quote form of one argument: safe for `sh -c`, whatever the argument holds. */
 export function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
@@ -104,7 +114,7 @@ export class HelperComputerProvider extends DesktopSandboxProvider {
         stickId: computer.botId,
         command,
         timeoutMs: request.timeoutMs,
-      })) as CommandResult;
+      }, clientTimeoutFor(request.timeoutMs))) as CommandResult;
     } catch (error) {
       yield { type: "stderr", data: `${error instanceof Error ? error.message : String(error)}\n` };
       yield { type: "exit", code: 1 };

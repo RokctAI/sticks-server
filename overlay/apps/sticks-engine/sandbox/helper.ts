@@ -260,7 +260,7 @@ function serveConnection(root: string, socket: Socket) {
 /**
  * Listens on a unix socket. Owner only: the socket is created with umask 0177, so it is 0600 from the
  * start, and chmod 0600 is applied after. Only the helper's own user can open it; the runner makes the
- * engine's user the owner or puts both in one group (spec 8.1, see the PR).
+ * engine's user the owner (spec 8.1).
  */
 export async function startHelper(options: { root: string; socketPath: string }): Promise<Server> {
   await mkdir(dirname(options.socketPath), { recursive: true });
