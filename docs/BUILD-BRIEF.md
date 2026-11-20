@@ -413,7 +413,8 @@ Settled decisions:
 ### Task 25: hub sign-in token as a small standalone SDK (owner's note 11-15, reworded 11-20; after task 9 merges)
 - Sticks signs users in with a short-lived token signed by the hub (`overlay/apps/sticks-engine/src/pulsar-token.ts` verifies it; `pulsar-session.ts` and `pulsar-front.ts` turn it into a session). Gravity needs the same sign-in, and Gravity is neither Frappe nor Pulsar.
 - So the SDK is backend-agnostic: pure verification with no Frappe, Pulsar or network calls. Input: the token (Bearer value) plus the hub's public key, the expected sender, the app's tenant id and the clock. Output: `{user, role, tenant, exp}` or a coded error (malformed, bad_signature, stale, replay, expired, wrong_tenant, unknown_role). It also ships the replay cache. Role names are passed in by the app, not fixed.
-- One TypeScript and one Python package, with the same test vectors on both sides. The engine then imports it instead of its own copy.
+- Where (decided 11-20): the control SDK in `RokctAI/control`, since the hub issues the tokens. TypeScript under its `nextjs/` side as `hub-token`, Python under its `pulsar/` side as `hub_token`, with the same test vectors on both sides. It must pass `sdk_validator.py`. It is a backend library, not app-facing, so the demo data, tour and guide rules do not apply.
+- Backward compatible: the token format stays exactly as docs/pulsar-engine-interface.md section 1 says; nothing that issues or accepts tokens today changes. The engine then imports it instead of its own copy.
 - What stays in each app: turning the verified user into that app's own session (for Sticks: upstream session rows, closed routes, guests).
 
 ## When you are done with all of them
