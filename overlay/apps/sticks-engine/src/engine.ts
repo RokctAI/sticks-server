@@ -16,10 +16,15 @@ import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { GITHUB_PLUGIN_DOCUMENT, GITHUB_PLUGIN_NAME } from "./github-plugin-document.js";
+import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
+import { socketEngram } from "./end-of-day-adapters.js";
+import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
+import { liveScripts, openStreams } from "./activity.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -83,6 +88,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
 
   // The engine's own plugin draft table (brief task 21): created if missing, on every start.
   await ensurePluginDraftTable(async (sql, values = []) => handles.prisma.$queryRawUnsafe<unknown[]>(sql, ...values));
+  // The built-in GitHub plugin (brief task 22): stored as approved if missing; never overwrites a stored one.
+  await seedBuiltinPlugin(sqlDraftRepository(async (q, v = []) => handles.prisma.$queryRawUnsafe<unknown[]>(q, ...v)), GITHUB_PLUGIN_NAME, GITHUB_PLUGIN_DOCUMENT);
   // Guest sign-ins are recorded here (brief task 9): the front door lets them only read.
   await handles.prisma.$queryRawUnsafe(GUEST_TABLE_SQL);
 
@@ -105,12 +112,16 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // runtime) and the Engram write (Pulsar side) are not connected yet, so a day fails with a clear error
   // (logged by onError) and the next day still runs.
   const offset = tzOffsetFromEnv(env);
+  // The Pulsar unix socket (credits, Engram) and the per-tenant engine secret.
+  const pulsarSocket = env.STICKS_PULSAR_SOCKET?.trim();
+  const creditsSecret = engineSecretFrom(dir);
   const scheduler = startBootScheduler({
     prisma: handles.prisma,
     jobs: handles.jobs,
     endOfDay: endOfDayHookFromEnv(
       env,
       engineEndOfDayDeps({
+        ...(pulsarSocket && creditsSecret ? { engram: socketEngram(pulsarSocket, creditsSecret, env.STICKS_TENANT?.trim() ?? "") } : {}),
         activeChats: (day) =>
           handles.prisma.thread.findMany({ where: activeChatsWhere(day, offset), select: { id: true }, take: 500 }),
         readThread: (threadId) =>
@@ -149,6 +160,13 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     }
   });
 
+  // Credits (brief task 12): settle runs a crash left unsettled. Runs reserve and settle through pulsar-credits.ts.
+  if (pulsarSocket && creditsSecret) {
+    await settleLeftovers(socketTransport(pulsarSocket, creditsSecret), sql)
+      .then((n) => n && console.log(JSON.stringify({ msg: "settled runs left unsettled", count: n })))
+      .catch((error) => logger.error("credits boot settle failed; will retry next boot", error));
+  }
+
   // Hub onboarding (control#204): only when STICKS_HUB_ONBOARDING=1. The chat page hands over the tenant's
   // onboarding token once (signed-in, not a guest); the plugin's three tools call the proxy routes, which add
   // the token. Callers must be signed in (any member) or hold the engine secret.
@@ -171,7 +189,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       try {
         const body = (await c.req.json()) as { onboarding_token?: unknown };
         await saveOnboardingToken(sql, body?.onboarding_token);
-        return c.json({ ok: true });
+        // The Onboarding Stick is made here, not at boot: a Stick needs an owner, and at boot nobody has signed in.
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const owner = (await sql(`SELECT "userId" FROM session WHERE token = $1 LIMIT 1`, [raw])) as Array<{ userId: string }>;
+        const stickId = owner[0] ? await ensureOnboardingStick(sql, owner[0].userId) : undefined;
+        return c.json({ ok: true, stickId: stickId ?? null });
       } catch (error) {
         return fail(c as never, error);
       }
@@ -194,27 +216,45 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   }
 
   // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
-  // Open streams and live scripts are not counted yet (no hook in upstream), so the tenant is never
-  // reported idle through them: see idle.ts and the PR.
+  // Open streams are counted at the front door and running sandbox commands in the helper client (activity.ts).
+  // Every change to either re-checks idle and pushes a change to Pulsar at once; nothing polls.
   const idle = new IdleTracker();
-  const untracked = () => undefined;
+  const streams = () => openStreams.value;
+  const scripts = () => liveScripts.value;
   handles.app.get("/internal/idle", async (c) => {
     const secret = engineSecretFrom(dir);
     if (!secret) return c.json({ error: "engine secret not provisioned" }, 503);
     if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
     const now = new Date();
-    const inputs = await readIdleInputs(handles.prisma, now, untracked, untracked);
+    const inputs = await readIdleInputs(handles.prisma, now, streams, scripts);
     return c.json(idle.update(inputs, now).snapshot);
   });
-  // The first evaluation at start: the engine is starting, so the state is new. Later changes are pushed
-  // when the engine learns of them (see the PR).
-  {
-    const secret = engineSecretFrom(dir);
-    const now = new Date();
-    const inputs = await readIdleInputs(handles.prisma, now, untracked, untracked);
-    const { snapshot, changed } = idle.update(inputs, now);
-    if (changed) void pushIdle(env.STICKS_IDLE_PUSH_URL, snapshot, secret);
-  }
+  let checking = false;
+  let again = false;
+  const recheck = async (): Promise<void> => {
+    if (checking) {
+      again = true;
+      return;
+    }
+    checking = true;
+    try {
+      do {
+        again = false;
+        const now = new Date();
+        const inputs = await readIdleInputs(handles.prisma, now, streams, scripts);
+        const { snapshot, changed } = idle.update(inputs, now);
+        if (changed) void pushIdle(env.STICKS_IDLE_PUSH_URL, snapshot, engineSecretFrom(dir));
+      } while (again);
+    } catch (error) {
+      logger.error("idle re-check failed", error);
+    } finally {
+      checking = false;
+    }
+  };
+  const offStreams = openStreams.onChange(() => void recheck());
+  const offScripts = liveScripts.onChange(() => void recheck());
+  // The first evaluation at start: the engine is starting, so the state is new.
+  await recheck();
 
   const stopUpstream = handles.stop;
   return {
@@ -222,6 +262,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     stop: async () => {
       scheduler.stop();
       clearInterval(defaultsTimer);
+      offStreams();
+      offScripts();
       await stopUpstream();
     },
   };

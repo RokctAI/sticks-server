@@ -92,12 +92,23 @@ engine's `sticks_guest` table at sign-in.
 - Hub limits win: each limited number is capped, and `browser_allowed: false` in the limits turns the browser off.
 - The answer is the effective settings. They are stored in the engine's `sticks_settings` table.
 
-## 5. Later sections (not yet written)
+## 5. Credits (task 12, engine side built)
 
-- Credits from Pulsar (task 12): `credits.reserve`, `credits.extend`, `credits.settle`.
-- Engram (task 18): the end-of-day memory call, section 5.
+The engine calls Pulsar over the unix socket in `STICKS_PULSAR_SOCKET`. Each call is `POST` with JSON and `Authorization: Bearer <engine secret>`. Amounts are micro-dollars, and 10,000 make one credit (1 credit = 1 US cent).
 
-## 6. Engram: the end-of-day memory call (task 18; Pulsar side not built)
+| Call | Body | Answer |
+|---|---|---|
+| `/credits/reserve` | `{run, stick, user}` | `{ok: true, block_micros}`, or `{ok: false, reason}`. The run does not start, and the user sees the reason. |
+| `/credits/extend` | `{run}` | `{ok: true, block_micros}` adds a block, or `{ok: false, reason}` stops the run with "credits exhausted". |
+| `/credits/settle` | `{run, used_micros, usage}` | `{ok: true}`. Idempotent on `run`: Pulsar must accept a repeat and charge once. |
+
+Each model call takes its maximum cost off the block in memory, with no call to Pulsar. Below 20 percent left, the engine extends. Runs are kept in `sticks_credit_runs`. At boot the engine settles every run that has no `settled_at`, so a crash before settle is still charged.
+
+## 6. Later sections (not yet written)
+
+- Engram (task 18): the end-of-day memory call, section 7.
+
+## 7. Engram: the end-of-day memory call (task 18; engine side built, Pulsar side not built)
 
 Once a day per tenant the engine summarises each chat active that day, writes the lasting facts to Engram
 through Pulsar, then clears that chat's working context. The job is held in `next_wake_at` (spec 7.6); it
@@ -113,9 +124,11 @@ has no timer of its own. Implementation: `overlay/apps/sticks-engine/src/end-of-
 - Sent over the same unix socket as credits (`STICKS_PULSAR_SOCKET`), with the per-tenant secret.
 - Success: Pulsar stores the facts in Engram for that tenant. Failure: the engine keeps the chat's
   working context and retries on the next run. The context is cleared only after success.
-- The transport and the Pulsar endpoint are a core-side build. Until it exists the engine uses a fake.
+- Path: `POST /engram/remember`. Answer `{ok: true}`, or `{ok: false, reason}`.
+- Engine transport: `socketEngram` in `end-of-day-adapters.ts`, used when `STICKS_PULSAR_SOCKET` is set. The Pulsar endpoint is a core-side build.
 - External memory providers (Supermemory, Serenity, Honcho) stay switched off in the Sticks build, so
   memory does not leave the tenant.
 
-**Not in this PR:** the wiring from `runEndOfDay` to the real `next_wake_at` item and to the gateway
-summariser, both of which depend on code in upstream and on the boot pass (task 7).
+**Still open:** the summariser step. Upstream's `compactHistory` needs the agent runtime, which the engine
+does not expose at v0.11.0, so compaction fails with a clear message and every chat keeps its context. This is to be
+done with the run hooks on the v0.13.0 repin.
