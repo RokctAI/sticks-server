@@ -1,5 +1,5 @@
 # Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
-# (TAG= in the Sticks app's UPSTREAM_PARITY file, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
+# ("upstream" in the Sticks app's manifest.json, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
 name: Upstream apps changes
 on:
   schedule:

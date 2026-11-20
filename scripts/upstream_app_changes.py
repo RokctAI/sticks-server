@@ -5,7 +5,7 @@ We fork once and never follow upstream, but our Dart app copies upstream's app b
 mean work there. This lists the changed files under apps/, grouped by app and area, so that work can be planned.
 
   python scripts/upstream_app_changes.py --repo <path to a clone with both tags> --from v0.11.0 --to v0.13.0
-Without --from, the release the Sticks app has caught up with (its UPSTREAM_PARITY file) is used; without --to, the newest tag.
+Without --from, the release the Sticks app has caught up with (the "upstream" field of its manifest.json) is used; without --to, the newest tag.
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def report(old: str, new: str, changes: list[tuple[str, str]]) -> str:
         for area, n in groups[app].most_common():
             lines.append(f"| {area} | {n} |")
         lines.append("")
-    lines += [f"The pin moves to {new} only after the Sticks app PR that catches up sets TAG={new} in its UPSTREAM_PARITY file."]
+    lines += [f"The pin moves to {new} only after the Sticks app PR that catches up sets \"upstream\": \"{new}\" in its manifest.json."]
     return "\n".join(lines) + "\n"
 
 
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
 
         old = reviewed_tag()
         if not old:
-            sys.stderr.write("could not read the app's UPSTREAM_PARITY (GH_TOKEN?); pass --from\n")
+            sys.stderr.write("could not read the app's manifest.json (GH_TOKEN?); pass --from\n")
             return 2
     new = a.new or newest_tag(a.repo)
     if old == new:

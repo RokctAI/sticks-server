@@ -42,14 +42,16 @@ class RepinGate(unittest.TestCase):
         from scripts import sync_upstream as s
         with tempfile.TemporaryDirectory() as d:
             f = Path(d, "reviewed.txt")
-            f.write_text("TAG=v0.11.0\n")
+            f.write_text('{"version": "1.2.0", "upstream": "v0.11.0"}')
             self.assertFalse(s.app_reviewed_for("v0.13.0", f))
-            f.write_text("TAG=v0.13.0\n")
+            f.write_text('{"upstream": "v0.13.0"}')
             self.assertTrue(s.app_reviewed_for("v0.13.0", f))
             self.assertTrue(s.app_reviewed_for("v0.12.0", f))
             self.assertFalse(s.app_reviewed_for("v0.13.0", Path(d, "missing.txt")))
-            f.write_text("v0.13.0\n")
-            self.assertFalse(s.app_reviewed_for("v0.13.0", f), "only TAG=vX.Y.Z counts")
+            f.write_text('{"upstream": "latest"}')
+            self.assertFalse(s.app_reviewed_for("v0.13.0", f), "only a release tag counts")
+            f.write_text("not json")
+            self.assertFalse(s.app_reviewed_for("v0.13.0", f))
 
 
 if __name__ == "__main__":

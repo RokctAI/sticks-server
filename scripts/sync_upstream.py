@@ -59,15 +59,19 @@ def parse_series(text: str) -> list[str]:
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
-# The Sticks app records the upstream release it has caught up with in its own repo (one line: TAG=vX.Y.Z).
+# The Sticks app records the upstream release it has caught up with in its own manifest ("upstream": "vX.Y.Z").
 # The pin may only move to a release the app has reached. Read with GH_TOKEN (the app repo is private);
 # any failure reads as "not reviewed", so the pin never moves on a guess.
-PARITY_REPO, PARITY_PATH, PARITY_REF = "RokctAI/agent", "agent/dart/UPSTREAM_PARITY", "main"
+PARITY_REPO, PARITY_PATH, PARITY_REF = "RokctAI/agent", "agent/dart/manifest.json", "main"
 
 
 def parse_parity(text: str) -> str:
-    m = re.search(r"^TAG=(v\d+\.\d+\.\d+)\s*$", text, re.MULTILINE)
-    return m.group(1) if m else ""
+    """The manifest's top-level "upstream" field, when it is a release tag; otherwise ""."""
+    try:
+        value = json.loads(text).get("upstream", "")
+    except (ValueError, AttributeError):
+        return ""
+    return value if isinstance(value, str) and re.fullmatch(r"v\d+\.\d+\.\d+", value) else ""
 
 
 def reviewed_tag(path: Path | None = None) -> str:
@@ -546,10 +550,10 @@ def main() -> int:
                 code = 2
                 status, result = "NOT READY", (
                     f"`{new_tag}` passes our checks but the pin was NOT written: the Sticks app is not yet marked "
-                    f"updated for it (its UPSTREAM_PARITY reads `{reviewed_tag() or 'unreadable'}`)."
+                    f"updated for it (its manifest's \"upstream\" is `{reviewed_tag() or 'unreadable'}`)."
                 )
                 steps = ("Read the upstream apps report (Upstream apps changes workflow), update the Sticks app, and set "
-                         f"TAG={new_tag} in {PARITY_REPO}:{PARITY_PATH} in that app PR; then re-run.")
+                         f"\"upstream\": \"{new_tag}\" in {PARITY_REPO}:{PARITY_PATH} in that app PR; then re-run.")
             elif args.write_pin:
                 try:
                     write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
