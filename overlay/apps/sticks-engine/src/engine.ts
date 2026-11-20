@@ -16,6 +16,7 @@ import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
 import { seedBuiltinPlugin } from "./plugin-seed.js";
+import { settleLeftovers, socketTransport } from "./pulsar-credits.js";
 import { ensureOnboardingStick } from "./onboarding-stick.js";
 import { isGuestSession, sessionTokenFrom } from "./pulsar-session.js";
 import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-of-day-wiring.js";
@@ -149,6 +150,15 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       throw error;
     }
   });
+
+  // Credits (brief task 12): settle runs a crash left unsettled. Runs reserve and settle through pulsar-credits.ts.
+  const pulsarSocket = env.STICKS_PULSAR_SOCKET?.trim();
+  const creditsSecret = engineSecretFrom(dir);
+  if (pulsarSocket && creditsSecret) {
+    await settleLeftovers(socketTransport(pulsarSocket, creditsSecret), sql)
+      .then((n) => n && console.log(JSON.stringify({ msg: "settled runs left unsettled", count: n })))
+      .catch((error) => logger.error("credits boot settle failed; will retry next boot", error));
+  }
 
   // Hub onboarding (control#204): only when STICKS_HUB_ONBOARDING=1. The chat page hands over the tenant's
   // onboarding token once (signed-in, not a guest); the plugin's three tools call the proxy routes, which add
