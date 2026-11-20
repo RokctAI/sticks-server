@@ -37,5 +37,18 @@ class UpstreamAppChanges(unittest.TestCase):
             self.assertEqual(m.main(["--repo", repo, "--from", "v1.0.0"]), 10)
 
 
+class RepinGate(unittest.TestCase):
+    def test_pin_moves_only_after_the_app_is_marked_updated(self):
+        from scripts import sync_upstream as s
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d, "reviewed.txt")
+            f.write_text("v0.11.0\n")
+            self.assertFalse(s.app_reviewed_for("v0.13.0", f))
+            f.write_text("v0.13.0\n")
+            self.assertTrue(s.app_reviewed_for("v0.13.0", f))
+            self.assertTrue(s.app_reviewed_for("v0.12.0", f))
+            self.assertFalse(s.app_reviewed_for("v0.13.0", Path(d, "missing.txt")))
+
+
 if __name__ == "__main__":
     unittest.main()

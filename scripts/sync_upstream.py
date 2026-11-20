@@ -58,6 +58,21 @@ def parse_series(text: str) -> list[str]:
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
+APPS_REVIEWED = ROOT / "upstream-apps-reviewed.txt"
+
+
+def reviewed_tag(path: Path | None = None) -> str:
+    """The upstream release the Sticks app has been updated for (set by hand once the app catches up)."""
+    p = path or APPS_REVIEWED
+    return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+
+
+def app_reviewed_for(tag: str, path: Path | None = None) -> bool:
+    """The pin may move to `tag` only once the app is marked updated for that release or a later one."""
+    want, have = tag_key(tag), tag_key(reviewed_tag(path))
+    return want is not None and have is not None and have >= want
+
+
 def tag_key(tag: str) -> tuple[int, int, int] | None:
     m = TAG_RE.match(tag)
     return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
@@ -507,7 +522,15 @@ def main() -> int:
         if code == 10:
             status, result = "NEWER TAG READY", f"`{new_tag}` is newer than `{pinned}` and our patches and contract check pass."
             steps = "Open a DRAFT PR moving the pin (the robot does this), test on a test instance, then let the gatekeeper review."
-            if args.write_pin:
+            if args.write_pin and not app_reviewed_for(new_tag):
+                code = 2
+                status, result = "NOT READY", (
+                    f"`{new_tag}` passes our checks but the pin was NOT written: the Sticks app is not yet marked "
+                    f"updated for it (upstream-apps-reviewed.txt is `{reviewed_tag()}`)."
+                )
+                steps = ("Read the upstream apps report (Upstream apps changes workflow), update the Sticks app, then set "
+                         f"upstream-apps-reviewed.txt to `{new_tag}` and re-run.")
+            elif args.write_pin:
                 try:
                     write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
                 except RuntimeError as exc:
