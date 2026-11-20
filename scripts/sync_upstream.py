@@ -59,10 +59,10 @@ def parse_series(text: str) -> list[str]:
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
-# The Sticks app records the upstream release it has caught up with in its own manifest ("upstream": "vX.Y.Z").
+# The Sticks app records the upstream release it has caught up with in its own version.json ("upstream": "vX.Y.Z").
 # The pin may only move to a release the app has reached. Read with GH_TOKEN (the app repo is private);
 # any failure reads as "not reviewed", so the pin never moves on a guess.
-PARITY_REPO, PARITY_PATH, PARITY_REF = "RokctAI/agent", "agent/dart/manifest.json", "main"
+PARITY_REPO, PARITY_PATH, PARITY_REF = "RokctAI/sticks", "version.json", "main"
 
 
 def parse_parity(text: str) -> str:
@@ -550,7 +550,7 @@ def main() -> int:
                 code = 2
                 status, result = "NOT READY", (
                     f"`{new_tag}` passes our checks but the pin was NOT written: the Sticks app is not yet marked "
-                    f"updated for it (its manifest's \"upstream\" is `{reviewed_tag() or 'unreadable'}`)."
+                    f"updated for it (its version.json \"upstream\" is `{reviewed_tag() or 'unreadable'}`)."
                 )
                 steps = ("Read the upstream apps report (Upstream apps changes workflow), update the Sticks app, and set "
                          f"\"upstream\": \"{new_tag}\" in {PARITY_REPO}:{PARITY_PATH} in that app PR; then re-run.")
