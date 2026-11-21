@@ -25,6 +25,7 @@ import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 import { liveScripts, openStreams } from "./activity.js";
+import { pulsarRequest, PulsarProxyError, seedPulsarPlugins } from "./pulsar-plugins.js";
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
@@ -285,6 +286,43 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           path,
           c.req.raw,
         );
+      });
+    }
+  }
+
+  // Pulsar plugins (Ray 11-21): one plugin per Pulsar area, seeded as drafts for the admin to approve. The proxy
+  // calls Pulsar's /api/resource at STICKS_PULSAR_URL (in the same container) with the Sticks service user's
+  // token (/run/secrets/pulsar_sticks_token), so Pulsar's role permissions for that user decide what it sees.
+  {
+    const engineUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    const pulsarUrl = env.STICKS_PULSAR_URL?.trim().replace(/\/+$/, "");
+    const secret = engineSecretFrom(dir);
+    if (engineUrl && /^https:\/\//.test(engineUrl) && pulsarUrl && secret) {
+      await seedPulsarPlugins(sqlDraftRepository(sql), engineUrl);
+      handles.app.all("/internal/pulsar/:area/:op", async (c) => {
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const bySecret = bearerMatches(c.req.header("authorization"), secret);
+        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
+        if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
+        try {
+          const body = c.req.method === "GET" ? {} : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+          const r = pulsarRequest(c.req.param("area"), c.req.param("op"), new URL(c.req.url).searchParams, body);
+          let token = "";
+          try {
+            token = readSecret("pulsar_sticks_token", dir);
+          } catch {
+            return c.json({ error: "Pulsar is not connected yet" }, 503);
+          }
+          const res = await fetch(`${pulsarUrl}${r.path}`, {
+            method: r.method,
+            headers: { authorization: `token ${token}`, ...(r.body !== undefined ? { "content-type": "application/json" } : {}) },
+            ...(r.body !== undefined ? { body: JSON.stringify(r.body) } : {}),
+          });
+          return new Response(await res.text(), { status: res.status, headers: { "content-type": "application/json" } });
+        } catch (error) {
+          if (error instanceof PulsarProxyError) return c.json({ error: error.message }, error.status);
+          throw error;
+        }
       });
     }
   }
