@@ -13,3 +13,11 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 4. Incoming: call push to the app, an Opus/WebRTC relay to the app, ring timeout, transfers.
 5. Launcher dialer: `telephony.dial {number}` returns a call id and a media URL, with call events and hang-up/mute/hold by call id.
 6. Pulsar: `telephony.may_call`, the tenant setting, and the Call Log.
+
+## PR 3: the call loop
+
+- `call-loop.ts` `runCall`: opening line, then listen, ask the Stick, speak. It ends on the objective being met, refused or given up; the person hanging up; silence (two "are you still there?" prompts); 40 turns; or credits refused (a polite goodbye).
+- The bot question is answered in code, never by the model.
+- Do not call asks why first.
+- Fake transfer: the same media, a new Stick with the handover summary, and its own opening line.
+- Media is an interface (`CallMedia`: listen, say, hangup). The SIP/RTP leg comes in the next PR. Choice to make there: a SIP user agent in the tenant image (for example a small pjsua or baresip process driven by the engine) against `voip.rokct.ai`, with Opus or G.711 audio, streaming speech to text and text to speech through the gateway.
