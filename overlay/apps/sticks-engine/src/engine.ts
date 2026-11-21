@@ -25,6 +25,8 @@ import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 import { liveScripts, openStreams } from "./activity.js";
+import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
+import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
@@ -260,6 +262,31 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       if (!thread) return c.json({ error: "thread is required" }, 400);
       return c.json({ reactions: await listReactions(sql, thread, c.req.query("since") || undefined) });
     });
+  }
+
+  // Speech for voice chat in the app (voice calls plan, piece 1). GET /internal/voice/setup (signed in) returns the
+  // base URL and proxy token to save as the Space's OpenAI-compatible voice server; /internal/voice/v1/* forwards
+  // to the gateway with the gateway key and charges credits. Needs STICKS_ENGINE_URL https and STICKS_GATEWAY_URL.
+  {
+    const engineUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    const gatewayUrl = env.STICKS_GATEWAY_URL?.trim();
+    const secret = engineSecretFrom(dir);
+    if (engineUrl && /^https:\/\//.test(engineUrl) && gatewayUrl && secret) {
+      handles.app.get("/internal/voice/setup", async (c) => {
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const ok = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
+        if (!ok) return c.json({ error: "unauthorized" }, 401);
+        return c.json({ baseUrl: `${engineUrl}/internal/voice/v1`, apiKey: voiceProxyToken(secret) });
+      });
+      handles.app.all("/internal/voice/v1/*", async (c) => {
+        const path = new URL(c.req.url).pathname.replace(/^\/internal\/voice\/v1\//, "");
+        return forwardVoice(
+          { gatewayUrl, gatewayKey: readGatewayKey(dir), engineSecret: secret, credits: pulsarSocket ? socketTransport(pulsarSocket, secret) : undefined },
+          path,
+          c.req.raw,
+        );
+      });
+    }
   }
 
   // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
