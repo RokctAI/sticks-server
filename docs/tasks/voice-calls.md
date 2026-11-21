@@ -20,3 +20,8 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 - `GET /internal/voice/setup` (signed in) returns `{baseUrl, apiKey}`. The app saves these once as the Space's voice server through upstream's own `voice/credentials`, using provider "openai-compatible". The apiKey is a proxy token derived from the engine secret, so the gateway key never leaves the engine.
 - Credits: each speak or transcribe call reserves and settles one block, at one credit until the gateway reports speech cost. A refusal answers 402 with the friendly message.
 - App side: record audio and call upstream `voice/transcribe`, then play the audio from upstream `voice/speak`. No other app logic.
+
+## PR 4: SIP building blocks
+
+- `sip.ts`: pure TypeScript with no native dependency. It covers parsing and building SIP messages, MD5 digest auth with or without qop=auth, an SDP offer and answer for PCMU plus telephone-event, RTP packets, and the G.711 u-law codec.
+- Not yet: the UDP transport (REGISTER, INVITE/ACK/BYE, RTP send and receive at 20 ms) that implements `CallMedia` against `voip.rokct.ai`. That needs a test SIP account (an org secret in occultation) to prove it against the real server; until then it is tested only against a fake.
