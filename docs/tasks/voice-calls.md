@@ -32,3 +32,13 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 
 - `sip.ts`: pure TypeScript with no native dependency. It covers parsing and building SIP messages, MD5 digest auth with or without qop=auth, an SDP offer and answer for PCMU plus telephone-event, RTP packets, and the G.711 u-law codec.
 - Not yet: the UDP transport (REGISTER, INVITE/ACK/BYE, RTP send and receive at 20 ms) that implements `CallMedia` against `voip.rokct.ai`. That needs a test SIP account (an org secret in occultation) to prove it against the real server; until then it is tested only against a fake.
+
+## PR 5: the call hub (softphone, with no PBX)
+
+- `call-hub.ts` `CallHub`: tracks each call and who holds our side of it: a Stick, "app" (a person), or voicemail.
+  - `dial(number)`: `telephony.dial` from the launcher dialer or the app.
+  - `incoming(...)`: the setting on means a Stick answers. The setting off means a push to the app, then a 20-second timer that falls back to a Stick or to voicemail.
+  - `appAnswer`, `toOwner`: a Stick puts the caller through to the owner.
+  - `hangup`, `setMute`, `setHold`.
+- Events `{callId, state: ringing|answered|ended|failed, direction, number, by?, reason?}` go to the app and dialer socket.
+- Still to wire: the SIP line (`CallLine`, from the sip.ts UDP transport), the WebRTC Opus relay, the push (FCM/APNs keys in occultation), and the `/internal/calls` routes.
