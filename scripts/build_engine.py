@@ -157,6 +157,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True, help="folder to build in (missing or empty)")
     ap.add_argument("--tag", help="build this release tag instead of upstream.pin's TAG")
+    ap.add_argument("--no-tests", action="store_true",
+                    help="skip the overlay tests (the image build: some tests need Docker, and CI's engine job runs them)")
     args = ap.parse_args()
 
     pin = up.read_pin(ROOT / "upstream.pin")
@@ -246,6 +248,9 @@ def main() -> int:
             print("tsc reports errors only inside upstream packages our code imports; upstream's check covers them")
 
     tests = overlay_test_files(overlay_list)
+    if args.no_tests:
+        step("overlay tests: skipped (--no-tests)")
+        return EXIT_OK
     if not tests:
         step("overlay tests: none yet, nothing to run")
         return EXIT_OK

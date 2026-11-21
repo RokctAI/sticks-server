@@ -68,7 +68,7 @@ ENV DISPLAY=:1
 CMD ["/bin/bash"]
 
 # The engine for the tenant image (brief task 17; one Rakazo per tenant docker, only Postgres outside). Builds
-# the pinned upstream with our patches and overlay, runs its typecheck and overlay tests, and bundles the entry.
+# the pinned upstream with our patches and overlay, runs its typecheck, and bundles the entry (overlay tests run in the engine CI job).
 # The tenant image (PlatformStack's Pulsar image) copies /opt/sticks from this stage and runs:
 #   node /opt/sticks/build/up/apps/sticks-engine/dist/sticks-engine.mjs
 # Listens on API_PORT (default 3100). Secrets come from /run/secrets (db_password, content_key, gateway_key,
