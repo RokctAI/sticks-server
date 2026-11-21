@@ -13,3 +13,10 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 4. Incoming: call push to the app, an Opus/WebRTC relay to the app, ring timeout, transfers.
 5. Launcher dialer: `telephony.dial {number}` returns a call id and a media URL, with call events and hang-up/mute/hold by call id.
 6. Pulsar: `telephony.may_call`, the tenant setting, and the Call Log.
+
+## PR 2: speech through the gateway (voice chat in the app)
+
+- The engine is an OpenAI-compatible speech server at `${STICKS_ENGINE_URL}/internal/voice/v1` (audio/speech, audio/transcriptions, models). It adds the gateway key and forwards the request to `${STICKS_GATEWAY_URL}/openai/v1/...`.
+- `GET /internal/voice/setup` (signed in) returns `{baseUrl, apiKey}`. The app saves these once as the Space's voice server through upstream's own `voice/credentials`, using provider "openai-compatible". The apiKey is a proxy token derived from the engine secret, so the gateway key never leaves the engine.
+- Credits: each speak or transcribe call reserves and settles one block, at one credit until the gateway reports speech cost. A refusal answers 402 with the friendly message.
+- App side: record audio and call upstream `voice/transcribe`, then play the audio from upstream `voice/speak`. No other app logic.
