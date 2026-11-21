@@ -66,3 +66,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER 1000:1000
 ENV DISPLAY=:1
 CMD ["/bin/bash"]
+
+# The engine for the tenant image (brief task 17; one Rakazo per tenant docker, only Postgres outside). Builds
+# the pinned upstream with our patches and overlay, runs its typecheck, and bundles the entry (overlay tests run in the engine CI job).
+# The tenant image (PlatformStack's Pulsar image) copies /opt/sticks from this stage and runs:
+#   node /opt/sticks/build/up/apps/sticks-engine/dist/sticks-engine.mjs
+# Listens on API_PORT (default 3100). Secrets come from /run/secrets (db_password, content_key, gateway_key,
+# pulsar_public_key, engine secret); nothing is baked in.
+FROM node:24-bookworm-slim AS engine
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 \
+  && rm -rf /var/lib/apt/lists/* && corepack enable
+WORKDIR /src
+COPY . /src
+RUN python3 scripts/package_engine.py --workdir /opt/sticks && rm -rf /src
+WORKDIR /opt/sticks
+ENV NODE_ENV=production API_PORT=3100
+EXPOSE 3100
+CMD ["node", "/opt/sticks/build/up/apps/sticks-engine/dist/sticks-engine.mjs"]
