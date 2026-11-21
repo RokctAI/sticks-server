@@ -27,3 +27,8 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 - Do not call asks why first.
 - Fake transfer: the same media, a new Stick with the handover summary, and its own opening line.
 - Media is an interface (`CallMedia`: listen, say, hangup). The SIP/RTP leg comes in the next PR. Choice to make there: a SIP user agent in the tenant image (for example a small pjsua or baresip process driven by the engine) against `voip.rokct.ai`, with Opus or G.711 audio, streaming speech to text and text to speech through the gateway.
+
+## PR 4: SIP building blocks
+
+- `sip.ts`: pure TypeScript with no native dependency. It covers parsing and building SIP messages, MD5 digest auth with or without qop=auth, an SDP offer and answer for PCMU plus telephone-event, RTP packets, and the G.711 u-law codec.
+- Not yet: the UDP transport (REGISTER, INVITE/ACK/BYE, RTP send and receive at 20 ms) that implements `CallMedia` against `voip.rokct.ai`. That needs a test SIP account (an org secret in occultation) to prove it against the real server; until then it is tested only against a fake.
