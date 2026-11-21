@@ -20,3 +20,10 @@ Plan: /mnt/project-files/sticks/voice-calls-plan.md (project files). Build order
 - `GET /internal/voice/setup` (signed in) returns `{baseUrl, apiKey}`. The app saves these once as the Space's voice server through upstream's own `voice/credentials`, using provider "openai-compatible". The apiKey is a proxy token derived from the engine secret, so the gateway key never leaves the engine.
 - Credits: each speak or transcribe call reserves and settles one block, at one credit until the gateway reports speech cost. A refusal answers 402 with the friendly message.
 - App side: record audio and call upstream `voice/transcribe`, then play the audio from upstream `voice/speak`. No other app logic.
+## PR 3: the call loop
+
+- `call-loop.ts` `runCall`: opening line, then listen, ask the Stick, speak. It ends on the objective being met, refused or given up; the person hanging up; silence (two "are you still there?" prompts); 40 turns; or credits refused (a polite goodbye).
+- The bot question is answered in code, never by the model.
+- Do not call asks why first.
+- Fake transfer: the same media, a new Stick with the handover summary, and its own opening line.
+- Media is an interface (`CallMedia`: listen, say, hangup). The SIP/RTP leg comes in the next PR. Choice to make there: a SIP user agent in the tenant image (for example a small pjsua or baresip process driven by the engine) against `voip.rokct.ai`, with Opus or G.711 audio, streaming speech to text and text to speech through the gateway.
