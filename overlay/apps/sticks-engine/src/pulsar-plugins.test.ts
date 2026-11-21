@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { draftFromOpenApi } from "./plugin-builder.js";
-import { areaPluginDocument, PULSAR_AREAS, pulsarRequest, seedPulsarPlugins, PulsarProxyError } from "./pulsar-plugins.js";
+import { areaPluginDocument, pulsarRequest, seedPulsarPlugins, PulsarProxyError, TESTED_AREAS } from "./pulsar-plugins.js";
 
 describe("Pulsar plugins", () => {
   it("makes one plugin per area with reads free and writes asking", () => {
@@ -9,10 +9,10 @@ describe("Pulsar plugins", () => {
     expect(d.operations.map((o) => o.method).sort()).toEqual(["GET", "GET", "POST", "POST", "POST"]);
   });
 
-  it("seeds every area once, as drafts", async () => {
+  it("seeds only areas whose live check passed, once, as drafts", async () => {
     const store = new Map<string, unknown>();
     const repo = { get: async (n: string) => store.get(n) as never, put: async (p: { name: string }) => void store.set(p.name, p) } as never;
-    expect(await seedPulsarPlugins(repo, "https://e.example")).toHaveLength(Object.keys(PULSAR_AREAS).length);
+    expect(await seedPulsarPlugins(repo, "https://e.example")).toHaveLength(TESTED_AREAS.length);
     expect(await seedPulsarPlugins(repo, "https://e.example")).toHaveLength(0);
   });
 
