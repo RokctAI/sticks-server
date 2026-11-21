@@ -25,6 +25,7 @@ import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 import { liveScripts, openStreams } from "./activity.js";
+import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -228,6 +229,37 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
         }
       });
     }
+  }
+
+  // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL
+  // https); the app reads GET /internal/reactions?thread=ID[&since=ISO] and buzzes on a new one while the chat is open.
+  {
+    const allowed = async (c: { req: { header: (n: string) => string | undefined; raw: Request } }) => {
+      const secret = engineSecretFrom(dir);
+      if (secret !== undefined && bearerMatches(c.req.header("authorization"), secret)) return true;
+      const raw = sessionTokenFrom(c.req.raw.headers);
+      if (!raw) return false;
+      const rows = (await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[];
+      return rows.length > 0;
+    };
+    const engineUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    if (engineUrl && /^https:\/\//.test(engineUrl)) await seedBuiltinPlugin(sqlDraftRepository(sql), "reactions", reactionsPluginDocument(engineUrl));
+    handles.app.post("/internal/reactions", async (c) => {
+      if (!(await allowed(c))) return c.json({ error: "unauthorized" }, 401);
+      const body = (await c.req.json().catch(() => ({}))) as { message_id?: unknown; emoji?: unknown };
+      try {
+        return c.json({ reaction: await addReaction(sql, body.message_id, body.emoji) });
+      } catch (error) {
+        if (error instanceof ReactionError) return c.json({ error: error.message }, error.status);
+        throw error;
+      }
+    });
+    handles.app.get("/internal/reactions", async (c) => {
+      if (!(await allowed(c))) return c.json({ error: "unauthorized" }, 401);
+      const thread = c.req.query("thread");
+      if (!thread) return c.json({ error: "thread is required" }, 400);
+      return c.json({ reactions: await listReactions(sql, thread, c.req.query("since") || undefined) });
+    });
   }
 
   // Idle and next wake (spec 7.6, brief task 8). GET /internal/idle needs the per-tenant engine secret.
