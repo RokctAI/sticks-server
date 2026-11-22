@@ -28,6 +28,7 @@ import { liveScripts, openStreams } from "./activity.js";
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
+import { readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
@@ -233,6 +234,22 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       });
     }
   }
+
+  // Hub feature switches (Ray 11-22). Pulsar posts the hub's resolved switches with the engine secret whenever they
+  // change (core#1630); signed-in people and the engine read them. Everything is on until the hub says otherwise.
+  handles.app.post("/internal/features", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (secret === undefined || !bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ features: await saveFeatures(sql, await c.req.json().catch(() => ({}))) });
+  });
+  handles.app.get("/internal/features", async (c) => {
+    const secret = engineSecretFrom(dir);
+    const bySecret = secret !== undefined && bearerMatches(c.req.header("authorization"), secret);
+    const raw = sessionTokenFrom(c.req.raw.headers);
+    const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
+    if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ features: await readFeatures(sql) });
+  });
 
   // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL
   // https); the app reads GET /internal/reactions?thread=ID[&since=ISO] and buzzes on a new one while the chat is open.
