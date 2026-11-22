@@ -1,0 +1,77 @@
+From 550cfee3f78bc44ef6d14878eb3ed59d743c2262 Mon Sep 17 00:00:00 2001
+From: Sticks <noreply@anthropic.com>
+Date: Sun, 22 Nov 2026 15:33:47 +0000
+Subject: [PATCH] Run-finished hooks and routine gates for the Sticks engine
+ (keep going, working hours)
+
+---
+ packages/adapters/src/run-routines.ts | 14 +++++++++++++-
+ packages/db/src/events.ts             | 13 +++++++++++++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/packages/adapters/src/run-routines.ts b/packages/adapters/src/run-routines.ts
+index e873d73a..bb10477d 100644
+--- a/packages/adapters/src/run-routines.ts
++++ b/packages/adapters/src/run-routines.ts
+@@ -128,6 +128,18 @@ function nextScheduledRunAt(
+     : nextRoutineRunDateAcross(routine.crons, scheduledAt, new Date(Date.now()), routine.timezone);
+ }
+ 
++/**
++ * Sticks (patch 0006): gates asked before a routine occurrence runs. Any gate answering false skips this
++ * occurrence the same way a deactivated owner's routine is skipped (the schedule is kept). Used for a Stick's
++ * working hours and "off duty".
++ */
++export const routineGates: Array<(routine: { id: string; botId: string; spaceId: string }, scheduledAt: Date) => Promise<boolean> | boolean> = [];
++
++async function gatesAllow(routine: { id: string; botId: string; spaceId: string }, scheduledAt: Date): Promise<boolean> {
++  for (const gate of routineGates) if (!(await gate(routine, scheduledAt))) return false;
++  return true;
++}
++
+ export async function wakeRoutine(deps: ExecutorDeps, routineId: string, scheduledFor: string) {
+   const scheduledAt = new Date(scheduledFor);
+   if (!Number.isFinite(scheduledAt.getTime())) return;
+@@ -143,7 +155,7 @@ export async function wakeRoutine(deps: ExecutorDeps, routineId: string, schedul
+   )
+     return;
+   if (await deferFutureRoutine(deps.jobs, routineId, scheduledAt)) return;
+-  if (await accountDeactivated(deps.prisma, routine.userId)) {
++  if ((await accountDeactivated(deps.prisma, routine.userId)) || !(await gatesAllow(routine, scheduledAt))) {
+     // A deactivated owner's routine skips this occurrence without running. A recurring or
+     // watching one keeps its schedule, so it runs again once the owner is back; a one-time
+     // one is spent. A watch that no longer parses keeps the default interval, so the normal
+diff --git a/packages/db/src/events.ts b/packages/db/src/events.ts
+index 53d629ca..ff130148 100644
+--- a/packages/db/src/events.ts
++++ b/packages/db/src/events.ts
+@@ -678,6 +678,14 @@ async function insertEventAlone(prisma: PrismaClient, input: AppendEventInput) {
+   return { ...row, ...event, type: input.type };
+ }
+ 
++/**
++ * Sticks (patch 0006): callbacks told after a run is finalized, so the engine can decide what comes next
++ * (keep going toward the goal, working hours, credits) without polling. A failing callback is logged and
++ * never affects the run.
++ */
++export type RunFinishedEvent = { runId: string; outcome: string; spaceId: string; threadId: string; botId: string };
++export const runFinishedHooks: Array<(event: RunFinishedEvent) => unknown> = [];
++
+ export async function finalizeRun(
+   prisma: PrismaClient,
+   input: FinalizeRunInput,
+@@ -700,6 +708,11 @@ export async function finalizeRun(
+     "bot.id": input.botId,
+   });
+   void captureRunAnalytics(prisma, analytics, input.runId, `run.${input.outcome}`);
++  for (const hook of runFinishedHooks) {
++    void Promise.resolve()
++      .then(() => hook({ runId: input.runId, outcome: String(input.outcome), spaceId: input.spaceId, threadId: input.threadId, botId: input.botId }))
++      .catch((error: unknown) => getLogger().error("run finished hook failed", { "run.id": input.runId, error: String(error) }));
++  }
+   return { continuationRunId: committed.continuationRunId };
+ }
+ 
+-- 
+2.43.0
+

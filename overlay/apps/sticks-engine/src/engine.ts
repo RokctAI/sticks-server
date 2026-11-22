@@ -32,6 +32,8 @@ import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
 import { DrainState } from "./drain.js";
+import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
+import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -304,6 +306,56 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
       await drain.set(false);
       return c.json({ draining: false });
+    });
+  }
+
+  // Working hours and off duty (Ray 11-09; duty.ts). Routines skip occurrences while a Stick is off duty or
+  // outside its hours (upstream routine gate, patch 0006). The Stick sets it through the built-in "duty" plugin;
+  // the app reads GET /internal/duty?stick=ID to show it resting. A signed-in caller must belong to the Stick's
+  // organization, so one tenant can never read or change another tenant's Stick.
+  {
+    const duty = new DutyStore(sql);
+    await duty.ensure();
+    routineGates.push(async (routine, at) => dutyState(await duty.get(routine.botId), at).on_duty);
+    const botOf = async (stick: unknown, thread: unknown): Promise<{ id: string; org: string } | undefined> => {
+      const rows = (typeof stick === "string" && stick
+        ? await sql(`SELECT b.id, s."organizationId" AS org FROM bots b JOIN spaces s ON s.id = b."spaceId" WHERE b.id = $1`, [stick])
+        : typeof thread === "string" && thread
+          ? await sql(`SELECT b.id, s."organizationId" AS org FROM threads t JOIN bots b ON b.id = t."botId" JOIN spaces s ON s.id = b."spaceId" WHERE t.id = $1`, [thread])
+          : []) as Array<{ id: string; org: string }>;
+      return rows[0];
+    };
+    const mayAct = async (c: { req: { header: (n: string) => string | undefined; raw: Request } }, org: string) => {
+      const secret = engineSecretFrom(dir);
+      if (secret !== undefined && bearerMatches(c.req.header("authorization"), secret)) return true;
+      const raw = sessionTokenFrom(c.req.raw.headers);
+      if (!raw) return false;
+      const rows = (await sql(
+        `SELECT 1 FROM session se JOIN member m ON m."userId" = se."userId" WHERE se.token = $1 AND se."expiresAt" > $2 AND m."organizationId" = $3 LIMIT 1`,
+        [raw, new Date(), org],
+      )) as unknown[];
+      return rows.length > 0;
+    };
+    const dutyUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    if (dutyUrl && /^https:\/\//.test(dutyUrl)) await seedBuiltinPlugin(sqlDraftRepository(sql), "duty", dutyPluginDocument(dutyUrl));
+    handles.app.get("/internal/duty", async (c) => {
+      const bot = await botOf(c.req.query("stick"), c.req.query("thread"));
+      if (!bot) return c.json({ error: "unknown Stick" }, 404);
+      if (!(await mayAct(c, bot.org))) return c.json({ error: "unauthorized" }, 401);
+      const d = await duty.get(bot.id);
+      return c.json({ stick: bot.id, hours: d.hours, ...dutyState(d, new Date()) });
+    });
+    handles.app.post("/internal/duty", async (c) => {
+      const body = (await c.req.json().catch(() => ({}))) as { stick_id?: unknown; thread_id?: unknown };
+      const bot = await botOf(body.stick_id, body.thread_id);
+      if (!bot) return c.json({ error: "unknown Stick" }, 404);
+      if (!(await mayAct(c, bot.org))) return c.json({ error: "unauthorized" }, 401);
+      try {
+        return c.json({ stick: bot.id, ...(await applyDutyChange(duty, bot.id, body, new Date())) });
+      } catch (error) {
+        if (error instanceof DutyError) return c.json({ error: error.message }, 400);
+        throw error;
+      }
     });
   }
 
