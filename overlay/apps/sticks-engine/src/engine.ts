@@ -12,7 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
-import { loadTenants, registerLegacyTenant, registerTenant, TenantError } from "./tenants.js";
+import { loadTenants, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
@@ -267,7 +267,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   });
 
   // Many tenants in one engine (Ray 11-22). Pulsar's first start registers its tenant with the engine secret:
-  // {tenant, site, company, public_key}. Repeating it is harmless; another tenant's name or site is refused.
+  // {tenant, site, company, public_key}. Create-only: repeating it with the same key is harmless; another tenant's name or site is refused (400) and a different key for an existing tenant is refused (409).
   handles.app.post("/internal/tenants", async (c) => {
     const s = engineSecretFrom(dir);
     if (s === undefined || !bearerMatches(c.req.header("authorization"), s)) return c.json({ error: "unauthorized" }, 401);
@@ -276,6 +276,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       const t = await registerTenant(sql, { tenant: body.tenant, site: body.site, company: body.company, publicKey: body.public_key });
       return c.json({ tenant: t.tenant, organization: t.orgId });
     } catch (error) {
+      if (error instanceof TenantConflictError) return c.json({ error: error.message }, 409);
       if (error instanceof TenantError) return c.json({ error: error.message }, 400);
       throw error;
     }

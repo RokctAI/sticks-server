@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { engineUserId, knownTenant, registerLegacyTenant, registerTenant, tenantBySite } from "./tenants.js";
+import { engineUserId, knownTenant, registerLegacyTenant, registerTenant, TenantConflictError, tenantBySite } from "./tenants.js";
 
 const KEY_A = "A".repeat(43) + "=";
 const KEY_B = "B".repeat(43) + "=";
@@ -42,12 +42,16 @@ describe("many tenants in one engine", () => {
     expect(knownTenant("nobody.rokct.ai")).toBeUndefined();
   });
 
-  it("registering again is harmless; another tenant's name or site is refused", async () => {
+  it("registering again with the same key is harmless; another key, name or site is refused", async () => {
     const { q, t } = db();
     const a = await registerTenant(q, { tenant: "acme", site: "acme.rokct.ai", company: "Acme", publicKey: KEY_A });
-    const again = await registerTenant(q, { tenant: "acme", site: "acme.rokct.ai", company: "Acme", publicKey: KEY_B });
+    const again = await registerTenant(q, { tenant: "acme", site: "acme.rokct.ai", company: "Acme", publicKey: KEY_A });
     expect(again.orgId).toBe(a.orgId);
     expect(t.orgs).toHaveLength(1);
+    // Another key for an existing tenant is refused and the old key still stands.
+    await expect(registerTenant(q, { tenant: "acme", site: "acme.rokct.ai", company: "Acme", publicKey: KEY_B })).rejects.toThrow(TenantConflictError);
+    expect(knownTenant("acme.rokct.ai")!.publicKey).toBe(KEY_A);
+    expect((await tenantBySite(q, "acme.rokct.ai"))!.publicKey).toBe(KEY_A);
     await expect(registerTenant(q, { tenant: "evil", site: "acme.rokct.ai", company: "E", publicKey: KEY_A })).rejects.toThrow(/another tenant/);
     await expect(registerTenant(q, { tenant: "acme", site: "evil.rokct.ai", company: "E", publicKey: KEY_A })).rejects.toThrow(/another tenant/);
   });

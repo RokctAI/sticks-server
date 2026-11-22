@@ -21,6 +21,8 @@ export const TENANTS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS sticks_tenants (
 export type Tenant = { tenant: string; site: string; orgId: string; spaceId: string; publicKey: string; legacy: boolean };
 
 export class TenantError extends Error {}
+/** Registration that would change an existing tenant's key. Rotation is a separate, signed call (later). */
+export class TenantConflictError extends TenantError {}
 
 /** Every registered tenant by signing site, kept in memory so a refused sign-in never touches the database.
  *  One engine process per docker (spec 4.2), so this process sees every registration. */
@@ -69,7 +71,7 @@ async function newOrg(query: SqlQuery, company: string, now: Date): Promise<{ or
 }
 
 /**
- * Adds a tenant, or returns it when it is already there (same site). A tenant name or site already used by a
+ * Adds a tenant, or returns it when it is already there (same site and same key). A tenant name or site already used by a
  * different tenant is refused, so one tenant can never take over another's organization.
  */
 export async function registerTenant(
@@ -88,8 +90,10 @@ export async function registerTenant(
     throw new TenantError("tenant or site already belongs to another tenant");
   }
   if (existing[0]) {
-    await query(`UPDATE sticks_tenants SET public_key = $2 WHERE tenant = $1`, [tenant, publicKey]);
-    return remember({ ...toTenant(existing[0]), publicKey });
+    // Create-only: the engine secret is shared by every tenant's Pulsar in one docker, so it must never be able to
+    // replace another tenant's key. The same key again is a no-op; a different key is refused.
+    if (existing[0].public_key !== publicKey) throw new TenantConflictError("this tenant already has a different key; registration cannot change it");
+    return remember(toTenant(existing[0]));
   }
   const { orgId, spaceId } = await newOrg(query, company, now);
   await query(

@@ -43,7 +43,7 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
           const site = (envelope as { sender?: { id?: unknown } })?.sender?.id;
           registered = typeof site === "string" ? knownTenant(site) : undefined;
           const key = registered ? publicKeyFromRawBase64(registered.publicKey) : deps.publicKey();
-          if (!key) return json(503, { error: "pulsar public key not provisioned" });
+          if (!key) return json(401, { error: "unauthorized" });
           verified = verifyPulsarToken(envelope, {
             publicKey: key,
             expectedSender: registered ? { kind: deps.sender.kind, id: registered.site } : deps.sender,
@@ -55,6 +55,9 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
           if (error instanceof PulsarTokenError) return json(401, { error: error.code });
           return json(401, { error: "malformed" });
         }
+        // User ids inside the engine carry the tenant ("acme/Administrator"), so a Pulsar user name with a slash could
+        // land on another tenant's user id. Refused for every tenant.
+        if (verified.user.includes("/")) return json(401, { error: "unauthorized" });
         const session = await openPulsarSession(
           deps.query, verified, deps.authSecret, at,
           registered ? { orgId: registered.orgId, spaceId: registered.spaceId, userId: engineUserId(registered, verified.user) } : undefined,

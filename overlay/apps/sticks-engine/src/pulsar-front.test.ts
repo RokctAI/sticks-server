@@ -89,7 +89,7 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
     expect(replay.status).toBe(401);
     expect(await replay.json()).toEqual({ error: "replay" });
     expect(db.calls.length).toBe(calls);
-    expect((await front(db, "").fetch(post(SIGN_IN_PATH, { authorization: once }), env)).status).toBe(503);
+    expect((await front(db, "").fetch(post(SIGN_IN_PATH, { authorization: once }), env)).status).toBe(401);
   });
 
   it("other sign-in routes are closed; reading the session and signing out stay open", async () => {
@@ -132,8 +132,8 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
     const reg = async () => [] as unknown[];
     const a = await registerTenant(reg, { tenant: "acme", site: "acme.shared", company: "Acme", publicKey: publicRaw });
     const b = await registerTenant(reg, { tenant: "beta", site: "beta.shared", company: "Beta", publicKey: otherPub });
-    const tokenFor = (tenant: string, site: string, priv: string, nonce: string) => {
-      const envelope = signEnvelope({ tenant, user: "Administrator", role: "Sticks Owner", exp: NOW.getTime() / 1000 + 300 }, {
+    const tokenFor = (tenant: string, site: string, priv: string, nonce: string, user = "Administrator") => {
+      const envelope = signEnvelope({ tenant, user, role: "Sticks Owner", exp: NOW.getTime() / 1000 + 300 }, {
         privateKey: privateKeyFromRawBase64(priv), sender: { kind: "site", id: site }, nowSeconds: NOW.getTime() / 1000, nonce,
       });
       return `Bearer ${Buffer.from(JSON.stringify(envelope)).toString("base64url")}`;
@@ -147,5 +147,8 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
     // A tenant cannot sign in as another: beta's key does not verify a token claiming acme's site.
     const forged = await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", otherPriv, "m3") }), env);
     expect(forged.status).toBe(401);
+    // A Pulsar user name with a slash could land on another tenant's engine user id: refused.
+    const slash = await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", privateRaw, "m4", "beta/Administrator") }), env);
+    expect(slash.status).toBe(401);
   });
 });
