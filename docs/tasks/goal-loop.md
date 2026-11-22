@@ -7,7 +7,7 @@ Keep-going (`keep-going.ts`, from #72) decided whether a Stick should continue, 
 - Upstream tells the engine each finalized run (patch 0006, `runFinishedHooks`).
 - `keep-going-wiring.ts` reads what the Stick still has open: its tickets (todo, doing), its open scratchpad items, and the chat's **goal** if one is set. Message text is read through upstream's Prisma client, which decrypts it.
 - keep-going decides as before (stops when the Stick asks the owner something, the owner wrote, a cap is reached, or nothing changes after 3 tries).
-- To continue, one follow-up run is queued after the gap (a task plus a queued `follow_up` run, then `run.continue`, the same way upstream queues a group handoff).
+- To continue, one follow-up run is written at once as queued with `wakeAt` at the end of the gap (a task plus a queued `follow_up` run, as upstream does for a group handoff), so `GET /internal/idle` reports it as `next_wake_at` and a sleep, restart or move cannot lose it; a timer starts it on time. Nothing is written while the docker is draining, and a timer firing during a drain leaves the run for the boot pass on the docker that comes back.
 - A Stick off duty or outside its working hours (`duty.ts`) is not pushed on.
 
 ## The goal

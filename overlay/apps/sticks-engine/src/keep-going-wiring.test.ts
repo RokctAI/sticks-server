@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KeepGoingStore } from "./keep-going.js";
-import { blocksText, keepGoingAfterRun, type KeepGoingDeps, type SnapshotReader } from "./keep-going-wiring.js";
+import { blocksText, keepGoingAfterRun, queueFollowUpDurable, type FollowUpDeps, type KeepGoingDeps, type SnapshotReader } from "./keep-going-wiring.js";
 
 const E = { runId: "r1", outcome: "completed", spaceId: "s1", threadId: "t1", botId: "b1" };
 const NOW = new Date("2026-11-23T08:00:00Z");
@@ -69,5 +69,50 @@ describe("keep-going after a run (wired through the run-finished hook)", () => {
   });
   it("reads only text blocks", () => {
     expect(blocksText([{ kind: "text", text: "a" }, { kind: "image" }, { kind: "text", text: "b" }])).toBe("a\nb");
+  });
+});
+
+describe("follow-ups survive a sleep or move, and nothing starts during a drain", () => {
+  function fu(draining: { v: boolean }) {
+    const runs: Array<{ id: string; wakeAt: Date }> = [];
+    const enqueued: string[] = [];
+    const timers: Array<() => void> = [];
+    const d: FollowUpDeps = {
+      createQueuedRun: async (_e, _u, _p, wakeAt) => {
+        runs.push({ id: `run${runs.length + 1}`, wakeAt });
+        return `run${runs.length}`;
+      },
+      enqueue: async (id) => void enqueued.push(id),
+      draining: () => draining.v,
+      schedule: (fn) => void timers.push(fn),
+      now: () => NOW,
+    };
+    return { d, runs, enqueued, timers };
+  }
+  it("writes a queued run waking at the end of the gap at once (idle reports it as next_wake_at), then starts it", async () => {
+    const f = fu({ v: false });
+    expect(await queueFollowUpDurable(f.d, E, "u1", "go on", 60)).toBe("run1");
+    expect(f.runs[0]!.wakeAt.toISOString()).toBe("2026-11-23T08:01:00.000Z");
+    f.timers[0]!();
+    expect(f.enqueued).toEqual(["run1"]);
+  });
+  it("while draining nothing is written", async () => {
+    const f = fu({ v: true });
+    expect(await queueFollowUpDurable(f.d, E, "u1", "go on", 60)).toBeUndefined();
+    expect(f.runs).toHaveLength(0);
+  });
+  it("a drain that starts in the gap leaves the run queued (not started) for the docker that comes back", async () => {
+    const draining = { v: false };
+    const f = fu(draining);
+    await queueFollowUpDurable(f.d, E, "u1", "go on", 60);
+    draining.v = true;
+    f.timers[0]!();
+    expect(f.enqueued).toHaveLength(0);
+    expect(f.runs).toHaveLength(1);
+  });
+  it("keep-going decides nothing while draining", async () => {
+    const { d, queued } = deps(db({ goal: "x", done: false }), reader());
+    expect(await keepGoingAfterRun({ ...d, draining: () => true }, E)).toBe("moving");
+    expect(queued).toHaveLength(0);
   });
 });

@@ -31,14 +31,14 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
-import { DrainState } from "./drain.js";
+import { DrainState, drainFlag } from "./drain.js";
 import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
 import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
 import { runFinishedHooks } from "../../../packages/db/src/events.ts";
 import { runAsSystem } from "../../../packages/db/src/row-security.ts";
 import { runContinueJob } from "../../../packages/adapter-kit/src/index.ts";
 import { KeepGoingStore } from "./keep-going.js";
-import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, readGoal, setGoal, type SnapshotReader } from "./keep-going-wiring.js";
+import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, queueFollowUpDurable, readGoal, setGoal, type FollowUpDeps, type RunFinished, type SnapshotReader } from "./keep-going-wiring.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -379,21 +379,24 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       scratchpad: (botId) =>
         sys(() => handles.prisma.scratchpadItem.findMany({ where: { botId, status: "open" }, select: { id: true, title: true, status: true }, take: 50 })),
     };
-    const queueFollowUp = async (e: { spaceId: string; botId: string; threadId: string }, userId: string, prompt: string, delaySeconds: number) => {
-      const fire = async () => {
-        const runId = await sys(() =>
+    const followUps: FollowUpDeps = {
+      createQueuedRun: (e, userId, prompt, wakeAt) =>
+        sys(() =>
           handles.prisma.$transaction(async (tx) => {
             const task = await tx.task.create({ data: { spaceId: e.spaceId, botId: e.botId, threadId: e.threadId, userId, prompt, status: "queued" } });
             const run = await tx.run.create({
-              data: { spaceId: e.spaceId, botId: e.botId, threadId: e.threadId, taskId: task.id, userId, status: "queued", trigger: "follow_up" },
+              data: { spaceId: e.spaceId, botId: e.botId, threadId: e.threadId, taskId: task.id, userId, status: "queued", trigger: "follow_up", wakeAt },
             });
             return run.id;
           }),
-        );
-        await handles.jobs.enqueue(runContinueJob(runId));
-      };
-      const timer = setTimeout(() => void fire().catch((error) => logger.error("keep-going follow-up failed", error)), Math.max(0, delaySeconds) * 1000);
-      timer.unref();
+        ),
+      enqueue: (runId) => handles.jobs.enqueue(runContinueJob(runId)).then(() => undefined),
+      draining: () => drainFlag.draining,
+      schedule: (fn, ms) => setTimeout(fn, ms).unref(),
+      now: () => new Date(),
+    };
+    const queueFollowUp = async (e: RunFinished, userId: string, prompt: string, delaySeconds: number) => {
+      await queueFollowUpDurable(followUps, e, userId, prompt, delaySeconds);
     };
     runFinishedHooks.push((e) =>
       keepGoingAfterRun(
@@ -403,6 +406,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           read,
           settings: () => settings.get().keepGoing,
           onDuty: async (botId, at) => dutyState(await duty.get(botId), at).on_duty,
+          draining: () => drainFlag.draining,
           queueFollowUp,
         },
         e,
