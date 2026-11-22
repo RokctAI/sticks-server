@@ -28,7 +28,6 @@ export function mergeFeatures(current: Features, incoming: unknown): Features {
 }
 
 export async function readFeatures(query: SqlQuery): Promise<Features> {
-  await query(FEATURES_TABLE_SQL, []);
   const rows = (await query(`SELECT features FROM sticks_features WHERE id = 1`, [])) as Array<{ features: unknown }>;
   return mergeFeatures(ALL_ON, rows[0]?.features);
 }
