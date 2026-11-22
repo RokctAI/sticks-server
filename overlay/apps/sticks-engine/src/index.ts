@@ -10,8 +10,8 @@ import { publicKeyFromRawBase64, senderFromTenantSite } from "./pulsar-token.js"
 const handles = await startEngine();
 const env = loadEnv(process.env);
 // Sign-in is by Pulsar token only (brief task 9): the front door closes upstream's other sign-in routes.
-const tenant = process.env.STICKS_TENANT?.trim();
-if (!tenant) throw new Error("STICKS_TENANT is required");
+// STICKS_TENANT is the one-tenant setup; a docker shared by many tenants registers them instead (tenants.ts).
+const tenant = process.env.STICKS_TENANT?.trim() ?? "";
 const secretsDir = process.env.STICKS_SECRETS_DIR ?? SECRETS_DIR;
 const front = pulsarFront(handles.app, {
   query: (sql, values = []) => handles.prisma.$queryRawUnsafe<unknown[]>(sql, ...values),
@@ -23,7 +23,7 @@ const front = pulsarFront(handles.app, {
       return undefined;
     }
   },
-  sender: senderFromTenantSite(process.env.STICKS_TENANT_SITE ?? ""),
+  sender: tenant ? senderFromTenantSite(process.env.STICKS_TENANT_SITE ?? "") : { kind: "site", id: "" },
   tenant,
 });
 const server = serveFetch(front, env.port, env.apiHost);

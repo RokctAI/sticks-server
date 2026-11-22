@@ -12,6 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
+import { loadTenants, registerLegacyTenant, registerTenant, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
@@ -103,7 +104,20 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // whose block was edited away gets it back (scripts/apply_stick_defaults.py ran nightly before).
   const sql = async (text: string, values: unknown[] = []) => handles.prisma.$queryRawUnsafe<unknown[]>(text, ...values);
   const company = env.STICKS_COMPANY_NAME?.trim();
-  if (company) await ensureTenantSpace(sql, company);
+  await loadTenants(sql);
+  if (company) {
+    const first = await ensureTenantSpace(sql, company);
+    // The one-tenant setup becomes the first entry of the tenant list (tenants.ts), keeping its plain user ids.
+    const tenant = env.STICKS_TENANT?.trim();
+    const site = env.STICKS_TENANT_SITE?.trim();
+    let key: string | undefined;
+    try {
+      key = readSecret("pulsar_public_key", dir);
+    } catch {
+      key = undefined;
+    }
+    if (tenant && site && key) await registerLegacyTenant(sql, tenant, site, first.orgId, first.spaceId, key);
+  }
   const applyDefaults = () =>
     applyStickDefaults(sql).catch((error) => logger.error("stick defaults failed", error));
   await applyDefaults();
@@ -250,6 +264,21 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
     if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
     return c.json({ features: await readFeatures(sql) });
+  });
+
+  // Many tenants in one engine (Ray 11-22). Pulsar's first start registers its tenant with the engine secret:
+  // {tenant, site, company, public_key}. Repeating it is harmless; another tenant's name or site is refused.
+  handles.app.post("/internal/tenants", async (c) => {
+    const s = engineSecretFrom(dir);
+    if (s === undefined || !bearerMatches(c.req.header("authorization"), s)) return c.json({ error: "unauthorized" }, 401);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const t = await registerTenant(sql, { tenant: body.tenant, site: body.site, company: body.company, publicKey: body.public_key });
+      return c.json({ tenant: t.tenant, organization: t.orgId });
+    } catch (error) {
+      if (error instanceof TenantError) return c.json({ error: error.message }, 400);
+      throw error;
+    }
   });
 
   // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL

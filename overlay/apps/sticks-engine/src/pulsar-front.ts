@@ -3,11 +3,12 @@
 // - every other upstream sign-in route (password, emailed code, passkey, SSO, sign-up) answers 404;
 // - a guest session may only read.
 import { envelopeFromAuthorization, NonceCache, PulsarTokenError, verifyPulsarToken } from "./pulsar-token.js";
-import type { publicKeyFromRawBase64 } from "./pulsar-token.js";
 import type { SqlQuery } from "./plugin-draft-store.js";
 import { guestMayDo, isClosedAuthPath, isGuestSession, openPulsarSession, sessionTokenFrom } from "./pulsar-session.js";
 import type { FetchApp, NodeEnv } from "./serve.js";
 import { countStream } from "./activity.js";
+import { engineUserId, knownTenant } from "./tenants.js";
+import { publicKeyFromRawBase64 } from "./pulsar-token.js";
 
 export const SIGN_IN_PATH = "/internal/pulsar/sign-in";
 
@@ -33,15 +34,20 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
       const url = new URL(request.url);
       if (url.pathname === SIGN_IN_PATH) {
         if (request.method !== "POST") return json(405, { error: "method not allowed" });
-        const key = deps.publicKey();
-        if (!key) return json(503, { error: "pulsar public key not provisioned" });
         const at = now();
         let verified;
+        let registered: ReturnType<typeof knownTenant>;
         try {
-          verified = verifyPulsarToken(envelopeFromAuthorization(request.headers.get("authorization") ?? undefined), {
+          const envelope = envelopeFromAuthorization(request.headers.get("authorization") ?? undefined);
+          // Many tenants (tenants.ts): the signing site names the tenant; its own key must verify the token.
+          const site = (envelope as { sender?: { id?: unknown } })?.sender?.id;
+          registered = typeof site === "string" ? knownTenant(site) : undefined;
+          const key = registered ? publicKeyFromRawBase64(registered.publicKey) : deps.publicKey();
+          if (!key) return json(503, { error: "pulsar public key not provisioned" });
+          verified = verifyPulsarToken(envelope, {
             publicKey: key,
-            expectedSender: deps.sender,
-            tenant: deps.tenant,
+            expectedSender: registered ? { kind: deps.sender.kind, id: registered.site } : deps.sender,
+            tenant: registered ? registered.tenant : deps.tenant,
             nowSeconds: Math.floor(at.getTime() / 1000),
             nonces,
           });
@@ -49,7 +55,10 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
           if (error instanceof PulsarTokenError) return json(401, { error: error.code });
           return json(401, { error: "malformed" });
         }
-        const session = await openPulsarSession(deps.query, verified, deps.authSecret, at);
+        const session = await openPulsarSession(
+          deps.query, verified, deps.authSecret, at,
+          registered ? { orgId: registered.orgId, spaceId: registered.spaceId, userId: engineUserId(registered, verified.user) } : undefined,
+        );
         return json(200, { token: session.bearer, expiresAt: session.expiresAt.toISOString() });
       }
       if (isClosedAuthPath(url.pathname)) return json(404, { error: "not found" });
