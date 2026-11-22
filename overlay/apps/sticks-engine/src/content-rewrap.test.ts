@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { LocalKeyProvider, masterKeysFromEnv } from "../../../packages/db/src/content-keys.ts";
 import {
   masterKeyFromContentKey,
   rewrapForMove,
@@ -45,5 +46,30 @@ describe("space keys re-wrapped for a docker move", () => {
 
   it("leaves rows that were not wrapped for a move as they are", () => {
     expect(rewrapFromMove(row, target, move)).toEqual(row);
+  });
+});
+
+// Upstream's own key provider (the one the engine runs), so a byte off in salt, info, AAD or layout fails here.
+describe("same format as upstream's content keys", () => {
+  const upstream = (contentKey: string) => new LocalKeyProvider(masterKeysFromEnv({ ENCRYPTION_KEY: contentKey } as NodeJS.ProcessEnv));
+  const ctx = { spaceId: "space-1", version: 3 };
+
+  it("a key wrapped by upstream opens with our unwrap, and a moved key opens with upstream on the target", async () => {
+    const dataKey = randomBytes(32);
+    const w = await upstream(source).wrap(dataKey, ctx);
+    expect(w.masterKeyId).toBe("env");
+    expect(unwrapDataKey(w.wrappedKey, masterKeyFromContentKey(source), ctx.spaceId, ctx.version).equals(dataKey)).toBe(true);
+    const row = { id: "k", ...ctx, masterKeyId: w.masterKeyId, wrappedKey: w.wrappedKey };
+    const landed = rewrapFromMove(rewrapForMove(row, source, move), target, move);
+    const opened = await upstream(target).unwrap({ masterKeyId: landed.masterKeyId, wrappedKey: landed.wrappedKey }, ctx);
+    expect(Buffer.from(opened).equals(dataKey)).toBe(true);
+    await expect(upstream(source).unwrap({ masterKeyId: landed.masterKeyId, wrappedKey: landed.wrappedKey }, ctx)).rejects.toThrow();
+  });
+
+  it("our wrap opens with upstream's provider", async () => {
+    const dataKey = randomBytes(32);
+    const wrapped = wrapDataKey(dataKey, masterKeyFromContentKey(target), ctx.spaceId, ctx.version);
+    const opened = await upstream(target).unwrap({ masterKeyId: "env", wrappedKey: wrapped }, ctx);
+    expect(Buffer.from(opened).equals(dataKey)).toBe(true);
   });
 });
