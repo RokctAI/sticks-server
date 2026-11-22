@@ -39,7 +39,8 @@ describe("engine rows for one tenant", () => {
     expect(out.rows.sticks_pulsar_tokens!.map((r) => r.stick_id)).toEqual(["a1"]);
     expect(out.rows.sticks_guest!.map((r) => r.user_id)).toEqual(["acme/g"]);
     const text = JSON.stringify(out);
-    expect(text).not.toMatch(/beta|b1|stk_plain_B/);
+    // Quoted values only: sealed tokens are base64 and can contain "b1" by chance.
+    expect(text).not.toMatch(/"(beta|beta\.shared|beta\/g|b1|b1@sticks\.local|B)"|stk_plain_B/);
     expect(text).not.toContain("stk_plain_A");
     // The token is sealed under the move key, not the source engine secret, and opens to the original.
     const sealed = String(out.rows.sticks_pulsar_tokens![0]!.sealed);
