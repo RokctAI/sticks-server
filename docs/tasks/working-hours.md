@@ -19,5 +19,5 @@ Ray: working hours, "off duty when told not to work", resting states.
 
 ## Not yet
 
-- Keep-going is built but not yet called by the engine; the next PR hooks it to `runFinishedHooks` and makes it respect duty.
+- Keep-going now runs through `runFinishedHooks` and respects duty (see goal-loop.md).
 - The app's resting look (Sticks app thread).

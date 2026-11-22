@@ -34,6 +34,11 @@ import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK
 import { DrainState } from "./drain.js";
 import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
 import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
+import { runFinishedHooks } from "../../../packages/db/src/events.ts";
+import { runAsSystem } from "../../../packages/db/src/row-security.ts";
+import { runContinueJob } from "../../../packages/adapter-kit/src/index.ts";
+import { KeepGoingStore } from "./keep-going.js";
+import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, readGoal, setGoal, type SnapshotReader } from "./keep-going-wiring.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -356,6 +361,79 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
         if (error instanceof DutyError) return c.json({ error: error.message }, 400);
         throw error;
       }
+    });
+
+    // Keep-going and the goal loop (Ray 11-11; keep-going-wiring.ts). Upstream tells us each finalized run
+    // (patch 0006); a Stick with open tickets, scratchpad items or an unfinished goal is asked to continue,
+    // within keep-going's caps and only while on duty.
+    const kgStore = new KeepGoingStore(sql);
+    await kgStore.ensure();
+    await sql(GOALS_TABLE_SQL);
+    const sys = <T>(fn: () => Promise<T>) => runAsSystem("sticks keep-going", fn);
+    const read: SnapshotReader = {
+      run: (id) => sys(() => handles.prisma.run.findUnique({ where: { id }, select: { status: true, completedAt: true, userId: true } })),
+      lastMessage: (threadId) =>
+        sys(() => handles.prisma.message.findFirst({ where: { threadId }, orderBy: { seq: "desc" }, select: { role: true, blocks: true, createdAt: true } })),
+      tickets: (botId) =>
+        sys(() => handles.prisma.ticket.findMany({ where: { assigneeBotId: botId, status: { in: ["todo", "doing", "blocked"] } }, select: { id: true, title: true, status: true }, take: 50 })),
+      scratchpad: (botId) =>
+        sys(() => handles.prisma.scratchpadItem.findMany({ where: { botId, status: "open" }, select: { id: true, title: true, status: true }, take: 50 })),
+    };
+    const queueFollowUp = async (e: { spaceId: string; botId: string; threadId: string }, userId: string, prompt: string, delaySeconds: number) => {
+      const fire = async () => {
+        const runId = await sys(() =>
+          handles.prisma.$transaction(async (tx) => {
+            const task = await tx.task.create({ data: { spaceId: e.spaceId, botId: e.botId, threadId: e.threadId, userId, prompt, status: "queued" } });
+            const run = await tx.run.create({
+              data: { spaceId: e.spaceId, botId: e.botId, threadId: e.threadId, taskId: task.id, userId, status: "queued", trigger: "follow_up" },
+            });
+            return run.id;
+          }),
+        );
+        await handles.jobs.enqueue(runContinueJob(runId));
+      };
+      const timer = setTimeout(() => void fire().catch((error) => logger.error("keep-going follow-up failed", error)), Math.max(0, delaySeconds) * 1000);
+      timer.unref();
+    };
+    runFinishedHooks.push((e) =>
+      keepGoingAfterRun(
+        {
+          store: kgStore,
+          query: sql,
+          read,
+          settings: () => settings.get().keepGoing,
+          onDuty: async (botId, at) => dutyState(await duty.get(botId), at).on_duty,
+          queueFollowUp,
+        },
+        e,
+      ).then((outcome) => console.log(JSON.stringify({ msg: "keep-going", bot: e.botId, run: e.runId, outcome }))),
+    );
+    const goalUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    if (goalUrl && /^https:\/\//.test(goalUrl)) await seedBuiltinPlugin(sqlDraftRepository(sql), "goal", goalPluginDocument(goalUrl));
+    handles.app.get("/internal/goal", async (c) => {
+      const bot = await botOf(undefined, c.req.query("thread"));
+      if (!bot) return c.json({ error: "unknown chat" }, 404);
+      if (!(await mayAct(c, bot.org))) return c.json({ error: "unauthorized" }, 401);
+      return c.json({ goal: (await readGoal(sql, String(c.req.query("thread")))) ?? null });
+    });
+    handles.app.post("/internal/goal", async (c) => {
+      const body = (await c.req.json().catch(() => ({}))) as { thread_id?: unknown; goal?: unknown };
+      const bot = await botOf(undefined, body.thread_id);
+      if (!bot) return c.json({ error: "unknown chat" }, 404);
+      if (!(await mayAct(c, bot.org))) return c.json({ error: "unauthorized" }, 401);
+      try {
+        return c.json(await setGoal(sql, String(body.thread_id), body.goal));
+      } catch (error) {
+        if (error instanceof GoalError) return c.json({ error: error.message }, 400);
+        throw error;
+      }
+    });
+    handles.app.post("/internal/goal/done", async (c) => {
+      const body = (await c.req.json().catch(() => ({}))) as { thread_id?: unknown; note?: unknown };
+      const bot = await botOf(undefined, body.thread_id);
+      if (!bot) return c.json({ error: "unknown chat" }, 404);
+      if (!(await mayAct(c, bot.org))) return c.json({ error: "unauthorized" }, 401);
+      return c.json({ done: await completeGoal(sql, String(body.thread_id), body.note) });
     });
   }
 
