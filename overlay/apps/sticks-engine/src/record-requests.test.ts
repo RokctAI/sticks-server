@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { SqlQuery } from "./plugin-draft-store.js";
 import { answerRecordRequest, createRecordRequest, listRecordRequests, validRecord } from "./record-requests.js";
 
-function fakeDb() {
+function fakeDb(): SqlQuery {
   const rows: Record<string, unknown>[] = [];
-  const q = async (sql: string, p: unknown[]) => {
+  const q: SqlQuery = async (sql, values) => {
+    const p = values ?? [];
     if (sql.startsWith("CREATE")) return [];
     if (sql.startsWith("INSERT")) { const r = { request_id: p[0], thread_id: p[1], message_id: p[2], module: p[3], action: p[4], record: JSON.parse(p[5] as string), decision: null, created_at: new Date().toISOString(), answered_at: null }; rows.push(r); return [r]; }
     if (sql.startsWith("UPDATE")) { const r = rows.find((x) => x.request_id === p[0] && x.decision === null); if (r) { r.decision = p[1]; r.answered_at = new Date().toISOString(); } return []; }
