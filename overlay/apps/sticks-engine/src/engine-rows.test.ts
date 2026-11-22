@@ -1,10 +1,12 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { SqlQuery } from "./plugin-draft-store.js";
 import { exportEngineRows } from "./engine-rows.js";
 import { seal, unseal } from "./stick-pulsar-accounts.js";
 
-const SECRET = "engine-secret-of-the-source-docker";
-const MOVE_KEY = "one-off-move-key-with-at-least-32-chars";
+// Made at run time so no secret scanner sees a literal.
+const SECRET = randomBytes(24).toString("hex");
+const MOVE_KEY = randomBytes(24).toString("hex");
 
 type Row = Record<string, unknown> & { org: string };
 
