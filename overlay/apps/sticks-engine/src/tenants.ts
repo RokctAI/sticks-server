@@ -120,3 +120,17 @@ export async function tenantBySite(query: SqlQuery, site: string): Promise<Tenan
   const rows = (await query(`SELECT * FROM sticks_tenants WHERE site = $1`, [site])) as Array<Record<string, unknown>>;
   return rows[0] ? toTenant(rows[0]) : undefined;
 }
+
+/**
+ * The Pulsar site a Stick belongs to (many tenants, step 2): one Pulsar in the docker serves every tenant's site,
+ * picked per request by the X-Frappe-Site-Name header, so each Stick's calls reach its own tenant's site and
+ * never another's. Undefined when the Stick's organization is not a registered tenant (then the one-tenant default).
+ */
+export async function pulsarSiteForStick(query: SqlQuery, stickId: string): Promise<string | undefined> {
+  await query(TENANTS_TABLE_SQL, []);
+  const rows = (await query(
+    `SELECT t.site FROM bots b JOIN spaces s ON s.id = b."spaceId" JOIN sticks_tenants t ON t.org_id = s."organizationId" WHERE b.id = $1`,
+    [stickId],
+  )) as Array<{ site: string }>;
+  return rows[0]?.site;
+}

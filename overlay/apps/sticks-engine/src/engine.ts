@@ -12,7 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
-import { loadTenants, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
+import { loadTenants, pulsarSiteForStick, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
@@ -455,7 +455,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
         if (!signed || !adminToken) return c.json({ error: "unauthorized" }, 401);
         const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
         try {
-          return c.json(await setUpStickAccount(sql, fetch, pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
+          // The admin's own tenant site (many tenants): the Stick's account is made on that site only.
+          const site = await pulsarSiteForStick(sql, c.req.param("stick"));
+          const siteFetch = (url: string, init: RequestInit) =>
+            fetch(url, { ...init, headers: { ...((init.headers as Record<string, string>) ?? {}), ...(site ? { "x-frappe-site-name": site } : {}) } });
+          return c.json(await setUpStickAccount(sql, siteFetch, pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
         } catch (error) {
           if (error instanceof StickAccountError) return c.json({ error: error.message }, error.status);
           throw error;
@@ -481,10 +485,12 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
               return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
             }
           }
+          const site = await pulsarSiteForStick(sql, stick);
           const res = await fetch(`${pulsarUrl}${r.path}`, {
             method: r.method,
             headers: {
               authorization: `token ${token}`,
+              ...(site ? { "x-frappe-site-name": site } : {}),
               ...(requestedBy ? { "x-requested-by": requestedBy.slice(0, 140) } : {}),
               ...(r.body !== undefined ? { "content-type": "application/json" } : {}),
             },

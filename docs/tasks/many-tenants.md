@@ -11,8 +11,13 @@ Ray: "The rule was one docker had one rakazo inside. It didn't limit tenants. A 
 - User ids carry the tenant (`acme/Administrator`), since every tenant has its own "Administrator".
 - Backward compatible: with `STICKS_TENANT` set (one engine per tenant, today's PlatformStack), that tenant is registered at boot on its existing organization with plain user ids, so its users, chats and Sticks stay theirs. `STICKS_TENANT` is no longer required.
 
+## Step 2 (part): each Stick talks to its own tenant's Pulsar site
+
+- One Pulsar in the docker serves every tenant's site. The Pulsar plugin proxy and the Stick account setup now send `X-Frappe-Site-Name: <the Stick's tenant site>` (Frappe's standard header for picking a site), looked up from the Stick's organization in `sticks_tenants` (`pulsarSiteForStick`). A Stick of tenant A therefore reads and writes only tenant A's site. With no registered tenant (one engine per tenant), nothing changes.
+- Still to check on a running shared docker: that the Pulsar fork keeps Frappe's header handling.
+
 ## Next steps
 
-2. Per-tenant Pulsar link, Stick accounts and keys (the Pulsar proxy, record cards, onboarding and features still assume one tenant).
+2. Rest of step 2: Stick accounts and keys (the Pulsar proxy, record cards, onboarding and features still assume one tenant).
 3. Credits per tenant (each run charged to its own tenant's Pulsar).
 4. Two-tenant isolation tests on a real database.
