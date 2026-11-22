@@ -60,16 +60,20 @@ export async function readIdleInputs(
   now: Date,
   streams: () => number | undefined,
   scripts: () => number | undefined,
+  orgId?: string,
 ): Promise<IdleInputs> {
+  // One tenant (idle?site=): only that organization's runs and routines. Streams and scripts are counted for the
+  // whole engine (they carry no tenant), so a busy neighbour can delay a tenant's idle but never hide its work.
+  const scope = orgId ? { space: { organizationId: orgId } } : {};
   const [activeRuns, nextRoutine, nextWait] = await Promise.all([
-    prisma.run.count({ where: { status: { in: ["leased", "running"] } } }),
+    prisma.run.count({ where: { status: { in: ["leased", "running"] }, ...scope } }),
     prisma.routine.findFirst({
-      where: { active: true, nextRunAt: { gt: now } },
+      where: { active: true, nextRunAt: { gt: now }, ...scope },
       orderBy: { nextRunAt: "asc" },
       select: { nextRunAt: true },
     }),
     prisma.run.findFirst({
-      where: { status: "queued", wakeAt: { gt: now } },
+      where: { status: "queued", wakeAt: { gt: now }, ...scope },
       orderBy: { wakeAt: "asc" },
       select: { wakeAt: true },
     }),
