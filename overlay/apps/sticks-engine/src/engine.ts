@@ -291,8 +291,9 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   }
 
   // Pulsar plugins (Ray 11-21): one plugin per Pulsar area, seeded as drafts for the admin to approve. The proxy
-  // calls Pulsar's /api/resource at STICKS_PULSAR_URL (in the same container) with the Sticks service user's
-  // token (/run/secrets/pulsar_sticks_token), so Pulsar's role permissions for that user decide what it sees.
+  // calls Pulsar's /api/resource at STICKS_PULSAR_URL (in the same container) Ray 11-22: each Stick is its own
+  // Pulsar user with its own role, so the call uses that Stick's token (pulsar_token_<stick>), never a shared
+  // account. The person who asked or approved goes along as X-Requested-By for Pulsar's record trail.
   {
     const engineUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
     const pulsarUrl = env.STICKS_PULSAR_URL?.trim().replace(/\/+$/, "");
@@ -307,15 +308,22 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
         try {
           const body = c.req.method === "GET" ? {} : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
           const r = pulsarRequest(c.req.param("area"), c.req.param("op"), new URL(c.req.url).searchParams, body);
+          const stick = c.req.header("x-sticks-stick") ?? "";
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(stick)) return c.json({ error: "which Stick is calling is required" }, 400);
+          const requestedBy = c.req.header("x-sticks-requested-by");
           let token = "";
           try {
-            token = readSecret("pulsar_sticks_token", dir);
+            token = readSecret(`pulsar_token_${stick}`, dir);
           } catch {
-            return c.json({ error: "Pulsar is not connected yet" }, 503);
+            return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
           }
           const res = await fetch(`${pulsarUrl}${r.path}`, {
             method: r.method,
-            headers: { authorization: `token ${token}`, ...(r.body !== undefined ? { "content-type": "application/json" } : {}) },
+            headers: {
+              authorization: `token ${token}`,
+              ...(requestedBy ? { "x-requested-by": requestedBy.slice(0, 140) } : {}),
+              ...(r.body !== undefined ? { "content-type": "application/json" } : {}),
+            },
             ...(r.body !== undefined ? { body: JSON.stringify(r.body) } : {}),
           });
           return new Response(await res.text(), { status: res.status, headers: { "content-type": "application/json" } });

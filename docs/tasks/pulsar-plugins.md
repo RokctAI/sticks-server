@@ -6,3 +6,9 @@
 - Callers: Stick runs (the plugin tools), and the call rules' contact check. The CRM area is the first one used, for calls (Contact, Lead, Customer).
 - Not yet: the live end-to-end check (a real model calls the CRM plugin against a real Pulsar), to come as a manual workflow like `live-tool-use.yml`.
 - Differs from the first proposal: calls run as the Sticks service user, not as the signed-in person, because plugin calls carry the plugin's connection rather than the person's session.
+
+## Stick accounts (Ray 11-22: "in sticks a bot has account similar to human")
+- Each Stick is its own Pulsar user with a role the tenant gives it. The proxy uses the Stick's own token for the Stick named in `X-Sticks-Stick`; there is no shared Sticks account.
+- `X-Sticks-Requested-By` (the person who asked or approved) is passed to Pulsar as `X-Requested-By`, so the record shows the Stick as the doer and the person as requester.
+- Only people the tenant allows to work with a Stick can direct it.
+- Needs in core: a Pulsar user per Stick, its token into the tenant secrets, and recording `X-Requested-By` on changes.
