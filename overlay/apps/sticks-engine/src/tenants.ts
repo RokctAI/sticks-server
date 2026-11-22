@@ -123,7 +123,7 @@ export async function tenantBySite(query: SqlQuery, site: string): Promise<Tenan
 
 /**
  * The Pulsar site a Stick belongs to (many tenants, step 2): one Pulsar in the docker serves every tenant's site,
- * picked per request by the X-Frappe-Site-Name header, so each Stick's calls reach its own tenant's site and
+ * picked per request by the Host header (pulsar-site-fetch.ts), so each Stick's calls reach its own tenant's site and
  * never another's. Undefined when the Stick's organization is not a registered tenant (then the one-tenant default).
  */
 export async function pulsarSiteForStick(query: SqlQuery, stickId: string): Promise<string | undefined> {
@@ -133,4 +133,10 @@ export async function pulsarSiteForStick(query: SqlQuery, stickId: string): Prom
     [stickId],
   )) as Array<{ site: string }>;
   return rows[0]?.site;
+}
+
+/** True when this engine serves tenants registered through POST /internal/tenants (a shared docker). */
+export async function hasSharedTenants(query: SqlQuery): Promise<boolean> {
+  await query(TENANTS_TABLE_SQL, []);
+  return ((await query(`SELECT 1 FROM sticks_tenants WHERE NOT legacy LIMIT 1`, [])) as unknown[]).length > 0;
 }

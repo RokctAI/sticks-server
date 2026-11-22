@@ -13,8 +13,8 @@ Ray: "The rule was one docker had one rakazo inside. It didn't limit tenants. A 
 
 ## Step 2 (part): each Stick talks to its own tenant's Pulsar site
 
-- One Pulsar in the docker serves every tenant's site. The Pulsar plugin proxy and the Stick account setup now send `X-Frappe-Site-Name: <the Stick's tenant site>` (Frappe's standard header for picking a site), looked up from the Stick's organization in `sticks_tenants` (`pulsarSiteForStick`). A Stick of tenant A therefore reads and writes only tenant A's site. With no registered tenant (one engine per tenant), nothing changes.
-- Still to check on a running shared docker: that the Pulsar fork keeps Frappe's header handling.
+- One Pulsar in the docker serves every tenant's site and picks the site from the Host header only. The Pulsar plugin proxy and the Stick account setup now connect to the docker's Pulsar address with `Host: <the Stick's tenant site>` (`pulsar-site-fetch.ts`; Node's fetch would replace a custom Host, so this uses node:http). The site comes from the Stick's organization in `sticks_tenants` (`pulsarSiteForStick`), so a Stick of tenant A reaches only tenant A's site.
+- Fail closed: on a docker with registered tenants, a Stick with no tenant is refused (503) instead of going to a default site. With no registered tenant (one engine per tenant), nothing changes.
 
 ## Next steps
 
