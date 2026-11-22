@@ -59,8 +59,10 @@ export async function openPulsarSession(
   token: VerifiedToken,
   secret: string,
   now: Date = new Date(),
+  /** The tenant that signed the token (tenants.ts). Without it: the first organization, plain ids (one tenant). */
+  tenant?: { orgId: string; spaceId: string; userId: string },
 ): Promise<{ bearer: string; expiresAt: Date; userId: string }> {
-  const userId = token.user;
+  const userId = tenant?.userId ?? token.user;
   await query(
     `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
      VALUES ($1, $2, $3, true, $4, $4)
@@ -68,7 +70,7 @@ export async function openPulsarSession(
     [userId, userId, placeholderEmail(token.user, token.tenant), now],
   );
 
-  const orgs = (await query(`SELECT id FROM organization ORDER BY "createdAt" ASC LIMIT 1`, [])) as Array<{ id: string }>;
+  const orgs = tenant ? [{ id: tenant.orgId }] : ((await query(`SELECT id FROM organization ORDER BY "createdAt" ASC LIMIT 1`, [])) as Array<{ id: string }>);
   const orgId = orgs[0]?.id;
   if (orgId) {
     await query(
@@ -76,10 +78,12 @@ export async function openPulsarSession(
        ON CONFLICT ("organizationId", "userId") DO UPDATE SET role = EXCLUDED.role`,
       [randomUUID(), orgId, userId, token.role, now],
     );
-    const spaces = (await query(
-      `SELECT id FROM spaces WHERE "organizationId" = $1 AND "deletingAt" IS NULL ORDER BY "isDefault" DESC, "createdAt" ASC LIMIT 1`,
-      [orgId],
-    )) as Array<{ id: string }>;
+    const spaces = tenant
+      ? [{ id: tenant.spaceId }]
+      : ((await query(
+          `SELECT id FROM spaces WHERE "organizationId" = $1 AND "deletingAt" IS NULL ORDER BY "isDefault" DESC, "createdAt" ASC LIMIT 1`,
+          [orgId],
+        )) as Array<{ id: string }>);
     const spaceId = spaces[0]?.id;
     if (spaceId) {
       await query(

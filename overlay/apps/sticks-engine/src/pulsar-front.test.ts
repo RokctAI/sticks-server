@@ -4,6 +4,7 @@ import { pulsarFront, SIGN_IN_PATH } from "./pulsar-front.js";
 import { isClosedAuthPath, placeholderEmail, sessionTokenFrom, signSessionToken } from "./pulsar-session.js";
 import { privateKeyFromRawBase64, publicKeyFromRawBase64, signEnvelope, type TokenBody } from "./pulsar-token.js";
 import type { NodeEnv } from "./serve.js";
+import { registerTenant } from "./tenants.js";
 
 const TENANT = "t_1";
 const SENDER = { kind: "site", id: "acme.example" };
@@ -88,7 +89,7 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
     expect(replay.status).toBe(401);
     expect(await replay.json()).toEqual({ error: "replay" });
     expect(db.calls.length).toBe(calls);
-    expect((await front(db, "").fetch(post(SIGN_IN_PATH, { authorization: once }), env)).status).toBe(503);
+    expect((await front(db, "").fetch(post(SIGN_IN_PATH, { authorization: once }), env)).status).toBe(401);
   });
 
   it("other sign-in routes are closed; reading the session and signing out stay open", async () => {
@@ -122,5 +123,32 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
 
   it("the placeholder email can never receive mail", () => {
     expect(placeholderEmail("U 1", "T_1")).toBe("u-1@t_1.sticks.invalid");
+  });
+
+  it("two tenants in one engine: each signs in with its own key into its own organization", async () => {
+    const other = generateKeyPairSync("ed25519");
+    const otherPriv = (other.privateKey.export({ format: "der", type: "pkcs8" }) as Buffer).subarray(-32).toString("base64");
+    const otherPub = (other.publicKey.export({ format: "der", type: "spki" }) as Buffer).subarray(-32).toString("base64");
+    const reg = async () => [] as unknown[];
+    const a = await registerTenant(reg, { tenant: "acme", site: "acme.shared", company: "Acme", publicKey: publicRaw });
+    const b = await registerTenant(reg, { tenant: "beta", site: "beta.shared", company: "Beta", publicKey: otherPub });
+    const tokenFor = (tenant: string, site: string, priv: string, nonce: string, user = "Administrator") => {
+      const envelope = signEnvelope({ tenant, user, role: "Sticks Owner", exp: NOW.getTime() / 1000 + 300 }, {
+        privateKey: privateKeyFromRawBase64(priv), sender: { kind: "site", id: site }, nowSeconds: NOW.getTime() / 1000, nonce,
+      });
+      return `Bearer ${Buffer.from(JSON.stringify(envelope)).toString("base64url")}`;
+    };
+    const db = fakeDb();
+    const f = front(db, "");
+    expect((await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", privateRaw, "m1") }), env)).status).toBe(200);
+    expect((await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("beta", "beta.shared", otherPriv, "m2") }), env)).status).toBe(200);
+    const members = db.calls.filter((c) => c.sql.startsWith("INSERT INTO member"));
+    expect(members.map((c) => [c.values[1], c.values[2]])).toEqual([[a.orgId, "acme/Administrator"], [b.orgId, "beta/Administrator"]]);
+    // A tenant cannot sign in as another: beta's key does not verify a token claiming acme's site.
+    const forged = await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", otherPriv, "m3") }), env);
+    expect(forged.status).toBe(401);
+    // A Pulsar user name with a slash could land on another tenant's engine user id: refused.
+    const slash = await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", privateRaw, "m4", "beta/Administrator") }), env);
+    expect(slash.status).toBe(401);
   });
 });
