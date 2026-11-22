@@ -11,4 +11,5 @@
 - Each Stick is its own Pulsar user with a role the tenant gives it. The proxy uses the Stick's own token for the Stick named in `X-Sticks-Stick`; there is no shared Sticks account.
 - `X-Sticks-Requested-By` (the person who asked or approved) is passed to Pulsar as `X-Requested-By`, so the record shows the Stick as the doer and the person as requester.
 - Only people the tenant allows to work with a Stick can direct it; that is enforced where a run starts, since this proxy takes the engine secret only. Create, update and submit asking the owner is also enforced upstream, not in this proxy.
-- Needs in core: a Pulsar user per Stick, its token into the tenant secrets, and recording `X-Requested-By` on changes.
+- Core side: core#1627 (Pulsar user per Stick, `X-Requested-By` stamped on records).
+- Account setup: `POST /internal/sticks/:stick/pulsar-account` `{displayName, role, directors?}`, signed in, with the admin's own Pulsar token in `X-Pulsar-Token` (Pulsar refuses non-admins). Calls `api.sticks.create_account` (rotates if it exists) and keeps the Stick's token sealed (AES-256-GCM, key from the engine secret) in `sticks_pulsar_tokens`, because /run/secrets is read-only at run time. Caller: the Sticks app's Stick settings (to build). `stick-pulsar-accounts.ts`.

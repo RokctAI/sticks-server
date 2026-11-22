@@ -29,6 +29,7 @@ import { pulsarRequest, PulsarProxyError, seedPulsarPlugins } from "./pulsar-plu
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
+import { setUpStickAccount, StickAccountError, stickToken } from "./stick-pulsar-accounts.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -300,6 +301,21 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     const secret = engineSecretFrom(dir);
     if (engineUrl && /^https:\/\//.test(engineUrl) && pulsarUrl && secret) {
       await seedPulsarPlugins(sqlDraftRepository(sql), engineUrl);
+      // Stick account setup (core#1627): a signed-in tenant admin sends their own Pulsar token once in
+      // X-Pulsar-Token; Pulsar refuses anyone without System Manager. Body {displayName, role, directors?}.
+      handles.app.post("/internal/sticks/:stick/pulsar-account", async (c) => {
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
+        const adminToken = c.req.header("x-pulsar-token");
+        if (!signed || !adminToken) return c.json({ error: "unauthorized" }, 401);
+        const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+        try {
+          return c.json(await setUpStickAccount(sql, fetch, pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
+        } catch (error) {
+          if (error instanceof StickAccountError) return c.json({ error: error.message }, error.status);
+          throw error;
+        }
+      });
       handles.app.all("/internal/pulsar/:area/:op", async (c) => {
         // Only Stick runs call this (engine secret). A person's session is refused: the Stick and requester headers
         // would be forgeable, and any member could write to Pulsar as any Stick account.
@@ -310,11 +326,15 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           const stick = c.req.header("x-sticks-stick") ?? "";
           if (!/^[A-Za-z0-9_-]{1,64}$/.test(stick)) return c.json({ error: "which Stick is calling is required" }, 400);
           const requestedBy = c.req.header("x-sticks-requested-by");
-          let token = "";
-          try {
-            token = readSecret(`pulsar_token_${stick}`, dir);
-          } catch {
-            return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
+          // The Stick's token is kept (sealed) by the account setup below; a file secret still works for images
+          // that ship one.
+          let token = await stickToken(sql, stick, secret);
+          if (!token) {
+            try {
+              token = readSecret(`pulsar_token_${stick}`, dir);
+            } catch {
+              return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
+            }
           }
           const res = await fetch(`${pulsarUrl}${r.path}`, {
             method: r.method,
