@@ -26,9 +26,12 @@ import { endOfDayHookFromEnv, engineEndOfDayDeps, tzOffsetFromEnv } from "./end-
 import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 import { liveScripts, openStreams } from "./activity.js";
+import { pulsarRequest, PulsarProxyError, seedPulsarPlugins } from "./pulsar-plugins.js";
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
+import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
+import { DrainState } from "./drain.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -282,6 +285,28 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     }
   });
 
+  // Drain and resume for docker moves (Ray 11-22 "Go"; caller: control's move_runner). Both need the engine secret.
+  // Drain answers with the current idle snapshot; the runner polls GET /internal/idle until idle before freezing.
+  {
+    const drain = new DrainState(sql);
+    await drain.load();
+    const bySecret = (h: string | undefined) => {
+      const s = engineSecretFrom(dir);
+      return s !== undefined && bearerMatches(h, s);
+    };
+    handles.app.post("/internal/drain", async (c) => {
+      if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      await drain.set(true);
+      const inputs = await readIdleInputs(handles.prisma, new Date(), () => openStreams.value, () => liveScripts.value);
+      return c.json({ draining: true, active_runs: inputs.activeRuns });
+    });
+    handles.app.post("/internal/resume", async (c) => {
+      if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      await drain.set(false);
+      return c.json({ draining: false });
+    });
+  }
+
   // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL
   // https); the app reads GET /internal/reactions?thread=ID[&since=ISO] and buzzes on a new one while the chat is open.
   {
@@ -394,6 +419,82 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           path,
           c.req.raw,
         );
+      });
+    }
+  }
+
+  // Pulsar plugins (Ray 11-21): one plugin per Pulsar area, seeded as drafts for the admin to approve. The proxy
+  // calls Pulsar's /api/resource at STICKS_PULSAR_URL (in the same container) Ray 11-22: each Stick is its own
+  // Pulsar user with its own role, so the call uses that Stick's token (pulsar_token_<stick>), never a shared
+  // account. The person who asked or approved goes along as X-Requested-By for Pulsar's record trail.
+  {
+    const engineUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
+    const pulsarUrl = env.STICKS_PULSAR_URL?.trim().replace(/\/+$/, "");
+    const secret = engineSecretFrom(dir);
+    if (engineUrl && /^https:\/\//.test(engineUrl) && pulsarUrl && secret) {
+      await seedPulsarPlugins(sqlDraftRepository(sql), engineUrl);
+      await sql(STICK_TOKENS_TABLE_SQL, []);
+      // Stick account setup (core#1627): a signed-in tenant admin sends their own Pulsar token once in
+      // X-Pulsar-Token; Pulsar refuses anyone without System Manager. Body {displayName, role, directors?}.
+      // Hand-off from Pulsar's first start (Ray 11-22 "Agreed"): Pulsar creates the Stick's account itself and posts
+      // its token here once with the engine secret. Body {user, token}.
+      handles.app.post("/internal/sticks/:stick/pulsar-token", async (c) => {
+        if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+        const stickId = c.req.param("stick");
+        const body = (await c.req.json().catch(() => ({}))) as { user?: unknown; token?: unknown };
+        if (!validStickId(stickId) || typeof body.user !== "string" || !body.user || typeof body.token !== "string" || !body.token) {
+          return c.json({ error: "stick, user and token are required" }, 400);
+        }
+        await saveStickToken(sql, stickId, body.user, body.token, secret);
+        return c.json({ ok: true });
+      });
+      handles.app.post("/internal/sticks/:stick/pulsar-account", async (c) => {
+        const raw = sessionTokenFrom(c.req.raw.headers);
+        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
+        const adminToken = c.req.header("x-pulsar-token");
+        if (!signed || !adminToken) return c.json({ error: "unauthorized" }, 401);
+        const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+        try {
+          return c.json(await setUpStickAccount(sql, fetch, pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
+        } catch (error) {
+          if (error instanceof StickAccountError) return c.json({ error: error.message }, error.status);
+          throw error;
+        }
+      });
+      handles.app.all("/internal/pulsar/:area/:op", async (c) => {
+        // Only Stick runs call this (engine secret). A person's session is refused: the Stick and requester headers
+        // would be forgeable, and any member could write to Pulsar as any Stick account.
+        if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+        try {
+          const body = c.req.method === "GET" ? {} : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+          const r = pulsarRequest(c.req.param("area"), c.req.param("op"), new URL(c.req.url).searchParams, body);
+          const stick = c.req.header("x-sticks-stick") ?? "";
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(stick)) return c.json({ error: "which Stick is calling is required" }, 400);
+          const requestedBy = c.req.header("x-sticks-requested-by");
+          // The Stick's token is kept (sealed) by the account setup below; a file secret still works for images
+          // that ship one.
+          let token = await stickToken(sql, stick, secret);
+          if (!token) {
+            try {
+              token = readSecret(`pulsar_token_${stick}`, dir);
+            } catch {
+              return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
+            }
+          }
+          const res = await fetch(`${pulsarUrl}${r.path}`, {
+            method: r.method,
+            headers: {
+              authorization: `token ${token}`,
+              ...(requestedBy ? { "x-requested-by": requestedBy.slice(0, 140) } : {}),
+              ...(r.body !== undefined ? { "content-type": "application/json" } : {}),
+            },
+            ...(r.body !== undefined ? { body: JSON.stringify(r.body) } : {}),
+          });
+          return new Response(await res.text(), { status: res.status, headers: { "content-type": "application/json" } });
+        } catch (error) {
+          if (error instanceof PulsarProxyError) return c.json({ error: error.message }, error.status);
+          throw error;
+        }
       });
     }
   }

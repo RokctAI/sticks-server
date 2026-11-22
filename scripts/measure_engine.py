@@ -43,7 +43,10 @@ POSTGRES_IMAGE = "postgres:18-alpine"
 SETTLE_SECONDS = 10
 HEALTH_TIMEOUT_SECONDS = 180
 ENGINE_ENTRY = "apps/sticks-engine/src/index.ts"
+ORG_ENTRY = "apps/sticks-engine/src/sticks-org.ts"
 BUNDLE_OUT = "apps/sticks-engine/dist/sticks-engine.mjs"
+# The tenant-move CLI (docs/tasks/org-move.md), bundled the same way next to the engine.
+ORG_BUNDLE_OUT = "apps/sticks-engine/dist/sticks-org.mjs"
 
 EXIT_OK, EXIT_NO_ENGINE, EXIT_ENV = 0, 1, 2
 
@@ -54,9 +57,9 @@ BUNDLER_JS = """\
 // Written by scripts/measure_engine.py into the build checkout. Not part of the repository.
 import * as esbuild from "esbuild";
 const NODE_MODULES = /[\\\\/]node_modules[\\\\/]/;
-await esbuild.build({
-  entryPoints: ["%(entry)s"],
-  outfile: "%(out)s",
+for (const [entry, out] of [["%(entry)s", "%(out)s"], ["%(org_entry)s", "%(org_out)s"]]) await esbuild.build({
+  entryPoints: [entry],
+  outfile: out,
   bundle: true,
   platform: "node",
   format: "esm",
@@ -84,7 +87,7 @@ await esbuild.build({
     },
   ],
 });
-""" % {"entry": ENGINE_ENTRY, "out": BUNDLE_OUT}
+""" % {"entry": ENGINE_ENTRY, "out": BUNDLE_OUT, "org_entry": ORG_ENTRY, "org_out": ORG_BUNDLE_OUT}
 
 
 # ---- pure helpers (tested in tests/test_measure_engine.py) ----------------------------------
