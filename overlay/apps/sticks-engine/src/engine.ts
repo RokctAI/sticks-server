@@ -301,10 +301,9 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     if (engineUrl && /^https:\/\//.test(engineUrl) && pulsarUrl && secret) {
       await seedPulsarPlugins(sqlDraftRepository(sql), engineUrl);
       handles.app.all("/internal/pulsar/:area/:op", async (c) => {
-        const raw = sessionTokenFrom(c.req.raw.headers);
-        const bySecret = bearerMatches(c.req.header("authorization"), secret);
-        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
-        if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
+        // Only Stick runs call this (engine secret). A person's session is refused: the Stick and requester headers
+        // would be forgeable, and any member could write to Pulsar as any Stick account.
+        if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
         try {
           const body = c.req.method === "GET" ? {} : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
           const r = pulsarRequest(c.req.param("area"), c.req.param("op"), new URL(c.req.url).searchParams, body);
