@@ -8,6 +8,7 @@ import type { SqlQuery } from "./plugin-draft-store.js";
 import { guestMayDo, isClosedAuthPath, isGuestSession, openPulsarSession, sessionTokenFrom } from "./pulsar-session.js";
 import type { FetchApp, NodeEnv } from "./serve.js";
 import { countStream } from "./activity.js";
+import { drainFlag, refusedWhileDraining } from "./drain.js";
 
 export const SIGN_IN_PATH = "/internal/pulsar/sign-in";
 
@@ -53,6 +54,8 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
         return json(200, { token: session.bearer, expiresAt: session.expiresAt.toISOString() });
       }
       if (isClosedAuthPath(url.pathname)) return json(404, { error: "not found" });
+      // During a docker move nothing new starts; the app retries after resume (drain.ts).
+      if (refusedWhileDraining(drainFlag.draining, request.method, url.pathname)) return json(503, { error: "moving", retry: true });
       if (!guestMayDo(request.method)) {
         const raw = sessionTokenFrom(request.headers);
         if (raw && (await isGuestSession(deps.query, raw, now()))) return json(403, { error: "guests may only read" });
