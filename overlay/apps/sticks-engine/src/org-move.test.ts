@@ -57,12 +57,15 @@ describe("org move", () => {
   });
 
   it("refuses an export that would reach a second organization", async () => {
-    // A user linked to both A and B, and a (hypothetical) column on organization that points down at the user.
+    // A (hypothetical) row under A that also points at organization B: the up-walk would pull B's row in.
     const tables: Record<string, Row[]> = {
-      organization: [{ id: "A", ownerId: "u1" }, { id: "B", ownerId: "u1" }],
-      user: [{ id: "u1" }],
+      organization: [{ id: "A" }, { id: "B" }],
+      link: [{ id: "l1", organizationId: "A", otherOrganizationId: "B" }],
     };
-    const fks = [{ child: "organization", child_cols: ["ownerId"], parent: "user", parent_cols: ["id"] }];
+    const fks = [
+      { child: "link", child_cols: ["organizationId"], parent: "organization", parent_cols: ["id"] },
+      { child: "link", child_cols: ["otherOrganizationId"], parent: "organization", parent_cols: ["id"] },
+    ];
     await expect(exportOrg(fakeDb(tables, fks), "A")).rejects.toThrow(/exactly one/);
   });
 
