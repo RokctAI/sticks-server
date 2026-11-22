@@ -2,6 +2,7 @@
 // service, no engine needed, with the same STICKS_DATABASE_URL (no password) and /run/secrets/db_password the
 // engine uses:
 //   node sticks-org.mjs export <organizationId> <file.json>
+//   node sticks-org.mjs export --only-org <file.json>   (the database holds one tenant: export that one)
 //   node sticks-org.mjs import <file.json>        (running it twice changes nothing)
 // Exit 0 on success, 1 on failure (the reason on stderr, never a secret). Encrypted content and stored secrets
 // stay encrypted with the source docker's content key, so the target docker must run with that same
@@ -21,7 +22,13 @@ async function main(argv: string[]): Promise<number> {
   const query = async (text: string, values: unknown[] = []) => (await client.query(text, values)).rows as unknown[];
   try {
     if (cmd === "export" && a && b) {
-      const data = await exportOrg(query, a);
+      let org = a;
+      if (a === "--only-org") {
+        const orgs = (await query(`SELECT id FROM organization`)) as Array<{ id: string }>;
+        if (orgs.length !== 1) throw new Error(`--only-org needs exactly one organization; found ${orgs.length}`);
+        org = orgs[0]!.id;
+      }
+      const data = await exportOrg(query, org);
       writeFileSync(b, JSON.stringify(data), { mode: 0o600 });
       console.log(JSON.stringify({ exported: Object.fromEntries(Object.entries(data.tables).map(([t, r]) => [t, r.length])) }));
       return 0;

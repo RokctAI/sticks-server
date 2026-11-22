@@ -8,6 +8,7 @@ Run inside the tenant service, which already has `STICKS_DATABASE_URL` and `/run
 
 ```
 node /opt/sticks/build/up/apps/sticks-engine/dist/sticks-org.mjs export <organizationId> <file.json>
+node /opt/sticks/build/up/apps/sticks-engine/dist/sticks-org.mjs export --only-org <file.json>   # one-tenant database
 node /opt/sticks/build/up/apps/sticks-engine/dist/sticks-org.mjs import <file.json>
 ```
 
