@@ -11,8 +11,13 @@ Ray: "The rule was one docker had one rakazo inside. It didn't limit tenants. A 
 - User ids carry the tenant (`acme/Administrator`), since every tenant has its own "Administrator".
 - Backward compatible: with `STICKS_TENANT` set (one engine per tenant, today's PlatformStack), that tenant is registered at boot on its existing organization with plain user ids, so its users, chats and Sticks stay theirs. `STICKS_TENANT` is no longer required.
 
+## Step 2 (part): each Stick talks to its own tenant's Pulsar site
+
+- One Pulsar in the docker serves every tenant's site and picks the site from the Host header only. The Pulsar plugin proxy and the Stick account setup now connect to the docker's Pulsar address with `Host: <the Stick's tenant site>` (`pulsar-site-fetch.ts`; Node's fetch would replace a custom Host, so this uses node:http). The site comes from the Stick's organization in `sticks_tenants` (`pulsarSiteForStick`), so a Stick of tenant A reaches only tenant A's site.
+- Fail closed: on a docker with registered tenants, a Stick with no tenant is refused (503) instead of going to a default site. With no registered tenant (one engine per tenant), nothing changes.
+
 ## Next steps
 
-2. Per-tenant Pulsar link, Stick accounts and keys (the Pulsar proxy, record cards, onboarding and features still assume one tenant).
+2. Rest of step 2: Stick accounts and keys (the Pulsar proxy, record cards, onboarding and features still assume one tenant).
 3. Credits per tenant (each run charged to its own tenant's Pulsar).
 4. Two-tenant isolation tests on a real database.

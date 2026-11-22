@@ -12,7 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
-import { knownTenant, loadTenants, tenantBySite, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
+import { hasSharedTenants, knownTenant, loadTenants, pulsarSiteForStick, tenantBySite, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
@@ -31,6 +31,7 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
+import { fetchForSite } from "./pulsar-site-fetch.js";
 import { DrainState, SiteDrainState, drainFlag, drainingOrgs } from "./drain.js";
 import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
 import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
@@ -622,7 +623,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
         if (!signed || !adminToken) return c.json({ error: "unauthorized" }, 401);
         const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
         try {
-          return c.json(await setUpStickAccount(sql, fetch, pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
+          // The admin's own tenant site (many tenants): the Stick's account is made on that site only.
+          const site = await pulsarSiteForStick(sql, c.req.param("stick"));
+          if (!site && (await hasSharedTenants(sql))) return c.json({ error: "This Stick's tenant is not known on this docker" }, 503);
+          const siteFetch = fetchForSite(site);
+          return c.json(await setUpStickAccount(sql, (url, init) => siteFetch(url, init as { method?: string; headers?: Record<string, string>; body?: string }), pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
         } catch (error) {
           if (error instanceof StickAccountError) return c.json({ error: error.message }, error.status);
           throw error;
@@ -648,7 +653,11 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
               return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
             }
           }
-          const res = await fetch(`${pulsarUrl}${r.path}`, {
+          // One Pulsar serves every tenant's site and picks it by Host (pulsar-site-fetch.ts). On a docker with
+          // registered tenants, a Stick with no tenant is refused rather than sent to a default site.
+          const site = await pulsarSiteForStick(sql, stick);
+          if (!site && (await hasSharedTenants(sql))) return c.json({ error: "This Stick's tenant is not known on this docker" }, 503);
+          const res = await fetchForSite(site)(`${pulsarUrl}${r.path}`, {
             method: r.method,
             headers: {
               authorization: `token ${token}`,
