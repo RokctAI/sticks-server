@@ -13,3 +13,5 @@
 - Only people the tenant allows to work with a Stick can direct it; that is enforced where a run starts, since this proxy takes the engine secret only. Create, update and submit asking the owner is also enforced upstream, not in this proxy.
 - Core side: core#1627 (Pulsar user per Stick, `X-Requested-By` stamped on records).
 - Account setup: `POST /internal/sticks/:stick/pulsar-account` `{displayName, role, directors?}`, signed in, with the admin's own Pulsar token in `X-Pulsar-Token` (Pulsar refuses non-admins). Calls `api.sticks.create_account` (rotates if it exists) and keeps the Stick's token sealed (AES-256-GCM, key from the engine secret) in `sticks_pulsar_tokens`, because /run/secrets is read-only at run time. Caller: the Sticks app's Stick settings (to build). `stick-pulsar-accounts.ts`.
+
+- First-start hand-off (Ray 11-22 "Agreed"): Pulsar creates the onboarding Stick's account when the site first starts (switched off when the plan has no AI) and posts `{user, token}` to `POST /internal/sticks/:stick/pulsar-token` with the engine secret. Caller: Pulsar's first-start provisioning (core thread).
