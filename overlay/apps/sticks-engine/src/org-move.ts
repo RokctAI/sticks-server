@@ -123,6 +123,9 @@ export async function exportOrg(query: SqlQuery, orgId: string, orgTable = "orga
       if (add(f.parent, await selectWhere(query, f.parent, f.parentCols, [...missing.values()])) > 0) changed = true;
     }
   }
+  // Hard guard: whatever the schema does, the export holds exactly the one organization it started from. If a
+  // table a user row hangs off ever pointed down from another organization, that tenant's rows would come along.
+  if ((rows.get(orgTable)?.size ?? 0) !== 1) throw new Error(`export reached ${rows.get(orgTable)?.size ?? 0} organization rows; refusing, it must hold exactly one`);
   const tables: Record<string, Array<Record<string, unknown>>> = {};
   for (const [t, m] of rows) {
     if (!m.size) continue;

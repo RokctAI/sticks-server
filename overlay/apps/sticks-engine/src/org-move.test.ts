@@ -12,9 +12,9 @@ const FKS = [
 ];
 
 /** A tiny in-memory database that answers only the statements org-move sends. */
-function fakeDb(tables: Record<string, Row[]>) {
+function fakeDb(tables: Record<string, Row[]>, fks: unknown[] = FKS) {
   return async (sql: string, p: unknown[] = []): Promise<unknown[]> => {
-    if (sql.includes("pg_constraint")) return FKS;
+    if (sql.includes("pg_constraint")) return fks;
     if (sql.includes("set_config") || sql.includes("information_schema")) return [];
     const t = /(?:FROM|INTO) "([^"]+)"/.exec(sql)![1]!;
     tables[t] ??= [];
@@ -54,6 +54,16 @@ describe("org move", () => {
     expect(JSON.stringify(out)).not.toMatch(/"B"|u2|t2|e3/);
     // Sessions hang off the user, not the org, so they are not walked down into.
     expect(out.tables.session).toBeUndefined();
+  });
+
+  it("refuses an export that would reach a second organization", async () => {
+    // A user linked to both A and B, and a (hypothetical) column on organization that points down at the user.
+    const tables: Record<string, Row[]> = {
+      organization: [{ id: "A", ownerId: "u1" }, { id: "B", ownerId: "u1" }],
+      user: [{ id: "u1" }],
+    };
+    const fks = [{ child: "organization", child_cols: ["ownerId"], parent: "user", parent_cols: ["id"] }];
+    await expect(exportOrg(fakeDb(tables, fks), "A")).rejects.toThrow(/exactly one/);
   });
 
   it("imports into an empty database, and a second import changes nothing", async () => {
