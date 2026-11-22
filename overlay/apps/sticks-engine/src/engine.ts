@@ -30,6 +30,7 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
+import { DrainState } from "./drain.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -253,6 +254,28 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
     return c.json({ features: await readFeatures(sql) });
   });
+
+  // Drain and resume for docker moves (Ray 11-22 "Go"; caller: control's move_runner). Both need the engine secret.
+  // Drain answers with the current idle snapshot; the runner polls GET /internal/idle until idle before freezing.
+  {
+    const drain = new DrainState(sql);
+    await drain.load();
+    const bySecret = (h: string | undefined) => {
+      const s = engineSecretFrom(dir);
+      return s !== undefined && bearerMatches(h, s);
+    };
+    handles.app.post("/internal/drain", async (c) => {
+      if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      await drain.set(true);
+      const inputs = await readIdleInputs(handles.prisma, new Date(), () => openStreams.value, () => liveScripts.value);
+      return c.json({ draining: true, active_runs: inputs.activeRuns });
+    });
+    handles.app.post("/internal/resume", async (c) => {
+      if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      await drain.set(false);
+      return c.json({ draining: false });
+    });
+  }
 
   // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL
   // https); the app reads GET /internal/reactions?thread=ID[&since=ISO] and buzzes on a new one while the chat is open.
