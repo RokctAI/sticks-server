@@ -10,7 +10,7 @@ import { countStream } from "./activity.js";
 import { engineUserId, knownTenant } from "./tenants.js";
 import { publicKeyFromRawBase64 } from "./pulsar-token.js";
 
-import { drainFlag, refusedWhileDraining } from "./drain.js";
+import { drainFlag, drainingOrgs, refusedWhileDraining, sessionOrg } from "./drain.js";
 
 export const SIGN_IN_PATH = "/internal/pulsar/sign-in";
 
@@ -60,6 +60,7 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
         // User ids inside the engine carry the tenant ("acme/Administrator"), so a Pulsar user name with a slash could
         // land on another tenant's user id. Refused for every tenant.
         if (verified.user.includes("/")) return json(401, { error: "unauthorized" });
+        if (registered && drainingOrgs.has(registered.orgId)) return json(503, { error: "moving", retry: true });
         const session = await openPulsarSession(
           deps.query, verified, deps.authSecret, at,
           registered ? { orgId: registered.orgId, spaceId: registered.spaceId, userId: engineUserId(registered, verified.user) } : undefined,
@@ -69,6 +70,12 @@ export function pulsarFront(inner: FetchApp, deps: FrontDeps): FetchApp {
       if (isClosedAuthPath(url.pathname)) return json(404, { error: "not found" });
       // During a docker move nothing new starts; the app retries after resume (drain.ts).
       if (refusedWhileDraining(drainFlag.draining, request.method, url.pathname)) return json(503, { error: "moving", retry: true });
+      // One tenant being moved (drain {site}): only its own writes are refused; other tenants keep working.
+      if (drainingOrgs.size > 0 && refusedWhileDraining(true, request.method, url.pathname)) {
+        const raw = sessionTokenFrom(request.headers);
+        const org = raw ? await sessionOrg(deps.query, raw) : undefined;
+        if (org && drainingOrgs.has(org)) return json(503, { error: "moving", retry: true });
+      }
       if (!guestMayDo(request.method)) {
         const raw = sessionTokenFrom(request.headers);
         if (raw && (await isGuestSession(deps.query, raw, now()))) return json(403, { error: "guests may only read" });

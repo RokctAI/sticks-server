@@ -5,6 +5,7 @@ import { isClosedAuthPath, placeholderEmail, sessionTokenFrom, signSessionToken 
 import { privateKeyFromRawBase64, publicKeyFromRawBase64, signEnvelope, type TokenBody } from "./pulsar-token.js";
 import type { NodeEnv } from "./serve.js";
 import { registerTenant } from "./tenants.js";
+import { drainingOrgs } from "./drain.js";
 
 const TENANT = "t_1";
 const SENDER = { kind: "site", id: "acme.example" };
@@ -150,5 +151,27 @@ describe("Pulsar sign-in (brief task 9 session layer)", () => {
     // A Pulsar user name with a slash could land on another tenant's engine user id: refused.
     const slash = await f.fetch(post(SIGN_IN_PATH, { authorization: tokenFor("acme", "acme.shared", privateRaw, "m4", "beta/Administrator") }), env);
     expect(slash.status).toBe(401);
+  });
+});
+
+describe("drain one tenant (drain {site}; many tenants)", () => {
+  it("refuses writes of the draining tenant's sessions only; reads and other tenants go through", async () => {
+    const sessions: Record<string, string> = { tokA: "org-A", tokB: "org-B" };
+    const query = async (sql: string, values: unknown[] = []) =>
+      sql.includes("activeOrganizationId") ? (sessions[values[0] as string] ? [{ org: sessions[values[0] as string], member_org: null }] : []) : [];
+    const f = pulsarFront(inner, { query, authSecret: SECRET, publicKey: () => publicKeyFromRawBase64(publicRaw), sender: SENDER, tenant: TENANT, now: () => NOW });
+    const req = (method: string, tok: string) =>
+      new Request("http://engine/api/threads", { method, headers: { authorization: `Bearer ${signSessionToken(tok, SECRET)}` } });
+    drainingOrgs.add("org-A");
+    try {
+      const a = await f.fetch(req("POST", "tokA"), env);
+      expect(a.status).toBe(503);
+      expect(await a.json()).toEqual({ error: "moving", retry: true });
+      expect((await f.fetch(req("GET", "tokA"), env)).status).toBe(200);
+      expect((await f.fetch(req("POST", "tokB"), env)).status).toBe(200);
+    } finally {
+      drainingOrgs.clear();
+    }
+    expect((await f.fetch(req("POST", "tokA"), env)).status).toBe(200);
   });
 });
