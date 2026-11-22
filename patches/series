@@ -6,3 +6,4 @@
 0003-cut-app-level-modules.patch
 0004-cut-messaging.patch
 0005-catalogue-through-gateway.patch
+0006-run-finished-hooks-and-routine-gates.patch
