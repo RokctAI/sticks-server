@@ -6,7 +6,11 @@
 // seals them again with a one-off move key (a file the move runner makes and gives to both sides, then deletes);
 // import opens them with that key and seals them with the target engine secret, so no token needs rotating.
 // Without a move key the tokens are left out (counted as skipped) and must be rotated after the move.
+// space_keys (upstream's per-space content keys) has no foreign key to spaces, so org-move.ts does not see it; it
+// is picked here. With a move key and the docker's content_key it is re-wrapped for the target (content-rewrap.ts);
+// without a move key it is copied as it is, which is readable only when both dockers have the same content_key.
 import { seal, unseal } from "./stick-pulsar-accounts.js";
+import { rewrapForMove, rewrapFromMove, MOVE_KEY_ID, type SpaceKeyRow } from "./content-rewrap.js";
 import type { SqlQuery } from "./plugin-draft-store.js";
 
 export type EngineRows = Record<string, Array<Record<string, unknown>>>;
@@ -17,6 +21,7 @@ const USERS = `SELECT "userId" FROM member WHERE "organizationId" = $1`;
 
 /** Table, key columns, and the rows of one organization. Tables that do not exist yet are skipped. */
 export const PICKS: Array<{ table: string; keys: string[]; where: string }> = [
+  { table: "space_keys", keys: ["id"], where: `"spaceId" IN (SELECT id FROM spaces WHERE "organizationId" = $1)` },
   { table: "sticks_tenants", keys: ["tenant"], where: `org_id = $1` },
   { table: "sticks_pulsar_tokens", keys: ["stick_id"], where: `stick_id IN (${BOTS})` },
   { table: "sticks_keep_going", keys: ["bot_id"], where: `bot_id IN (${BOTS})` },
@@ -33,13 +38,18 @@ async function tableExists(query: SqlQuery, table: string): Promise<boolean> {
 export async function exportEngineRows(
   query: SqlQuery,
   orgId: string,
-  keys: { engineSecret?: string; moveKey?: string },
-): Promise<{ rows: EngineRows; skippedTokens: number }> {
+  keys: { engineSecret?: string; moveKey?: string; contentKey?: string },
+): Promise<{ rows: EngineRows; skippedTokens: number; spaceKeysRewrapped: boolean }> {
   const rows: EngineRows = {};
   let skippedTokens = 0;
   for (const p of PICKS) {
     if (!(await tableExists(query, p.table))) continue;
     let list = (await query(`SELECT * FROM ${p.table} WHERE ${p.where}`, [orgId])) as Array<Record<string, unknown>>;
+    if (p.table === "space_keys" && keys.moveKey) {
+      const { contentKey, moveKey } = keys;
+      if (!contentKey) throw new Error("re-wrapping space keys needs this docker's content_key");
+      list = list.map((r) => rewrapForMove(r as SpaceKeyRow, contentKey, moveKey));
+    }
     if (p.table === "sticks_pulsar_tokens") {
       const { engineSecret, moveKey } = keys;
       if (!engineSecret || !moveKey) {
@@ -52,14 +62,14 @@ export async function exportEngineRows(
     for (const r of list) for (const [k, v] of Object.entries(r)) if (v instanceof Date) r[k] = v.toISOString();
     rows[p.table] = list;
   }
-  return { rows, skippedTokens };
+  return { rows, skippedTokens, spaceKeysRewrapped: Boolean(keys.moveKey) };
 }
 
 /** Adds the rows; rows already there are left alone, so running it twice changes nothing. */
 export async function importEngineRows(
   query: SqlQuery,
   rows: EngineRows | undefined,
-  keys: { engineSecret?: string; moveKey?: string },
+  keys: { engineSecret?: string; moveKey?: string; contentKey?: string },
   ensureTables: Record<string, string>,
 ): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
@@ -73,7 +83,11 @@ export async function importEngineRows(
       throw new Error("the file carries Stick tokens: import needs the same move key and this docker's engine secret");
     let added = 0;
     for (const raw of list) {
-      const r = p.table === "sticks_pulsar_tokens" ? { ...raw, sealed: seal(unseal(String(raw.sealed), moveKey!), engineSecret!) } : raw;
+      let r = p.table === "sticks_pulsar_tokens" ? { ...raw, sealed: seal(unseal(String(raw.sealed), moveKey!), engineSecret!) } : raw;
+      if (p.table === "space_keys" && raw.masterKeyId === MOVE_KEY_ID) {
+        if (!moveKey || !keys.contentKey) throw new Error("the file carries re-wrapped space keys: import needs the same move key and this docker's content_key");
+        r = rewrapFromMove(raw as SpaceKeyRow, keys.contentKey, moveKey);
+      }
       const cols = Object.keys(r);
       const values = cols.map((c) => (r[c] !== null && typeof r[c] === "object" ? JSON.stringify(r[c]) : r[c]));
       const res = (await query(
