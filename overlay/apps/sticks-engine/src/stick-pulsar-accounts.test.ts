@@ -29,6 +29,10 @@ describe("stick pulsar accounts", () => {
     expect(r.user).toBe("lebo@sticks.local");
     expect(calls).toEqual(["create_account", "rotate_token"]);
     expect(await stickToken(q, "lebo", "secret")).toBe("stk_new");
+    expect(r.rotated).toBe(true);
+    expect(r.note).toMatch(/not changed/);
+    // A changed engine secret means the token can't be opened: no account, not an error.
+    expect(await stickToken(q, "lebo", "different")).toBeUndefined();
   });
   it("refuses when Pulsar says the caller is not an admin", async () => {
     const fetcher = async () => new Response("{}", { status: 403 });

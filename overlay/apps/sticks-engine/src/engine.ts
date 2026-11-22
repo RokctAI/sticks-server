@@ -29,7 +29,7 @@ import { pulsarRequest, PulsarProxyError, seedPulsarPlugins } from "./pulsar-plu
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
-import { setUpStickAccount, StickAccountError, stickToken } from "./stick-pulsar-accounts.js";
+import { setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL } from "./stick-pulsar-accounts.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -301,11 +301,12 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     const secret = engineSecretFrom(dir);
     if (engineUrl && /^https:\/\//.test(engineUrl) && pulsarUrl && secret) {
       await seedPulsarPlugins(sqlDraftRepository(sql), engineUrl);
+      await sql(STICK_TOKENS_TABLE_SQL, []);
       // Stick account setup (core#1627): a signed-in tenant admin sends their own Pulsar token once in
       // X-Pulsar-Token; Pulsar refuses anyone without System Manager. Body {displayName, role, directors?}.
       handles.app.post("/internal/sticks/:stick/pulsar-account", async (c) => {
         const raw = sessionTokenFrom(c.req.raw.headers);
-        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 : false;
+        const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
         const adminToken = c.req.header("x-pulsar-token");
         if (!signed || !adminToken) return c.json({ error: "unauthorized" }, 401);
         const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;

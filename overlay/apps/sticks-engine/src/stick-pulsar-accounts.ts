@@ -39,7 +39,6 @@ export function unseal(sealed: string, engineSecret: string): string {
 }
 
 export async function saveStickToken(query: SqlQuery, stickId: string, pulsarUser: string, token: string, engineSecret: string): Promise<void> {
-  await query(STICK_TOKENS_TABLE_SQL, []);
   await query(
     `INSERT INTO sticks_pulsar_tokens (stick_id, pulsar_user, sealed) VALUES ($1,$2,$3)
      ON CONFLICT (stick_id) DO UPDATE SET pulsar_user = EXCLUDED.pulsar_user, sealed = EXCLUDED.sealed, updated_at = now()`,
@@ -49,9 +48,14 @@ export async function saveStickToken(query: SqlQuery, stickId: string, pulsarUse
 
 /** The Stick's Pulsar token, or undefined when it has no account yet. */
 export async function stickToken(query: SqlQuery, stickId: string, engineSecret: string): Promise<string | undefined> {
-  await query(STICK_TOKENS_TABLE_SQL, []);
   const rows = (await query(`SELECT sealed FROM sticks_pulsar_tokens WHERE stick_id = $1`, [stickId])) as Array<{ sealed: string }>;
-  return rows[0] ? unseal(rows[0].sealed, engineSecret) : undefined;
+  if (!rows[0]) return undefined;
+  try {
+    return unseal(rows[0].sealed, engineSecret);
+  } catch {
+    // The engine secret changed, so the sealed token can't be opened: treat as no account so an admin can re-run setup.
+    return undefined;
+  }
 }
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -60,7 +64,7 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 export async function setUpStickAccount(
   query: SqlQuery, fetcher: Fetch, pulsarUrl: string, adminToken: string, engineSecret: string,
   input: { stickId: unknown; displayName: unknown; role: unknown; directors?: unknown },
-): Promise<{ user: string }> {
+): Promise<{ user: string; rotated?: true; note?: string }> {
   const { stickId, displayName, role, directors } = input;
   if (!validStickId(stickId)) throw new StickAccountError("stick id is invalid", 400);
   if (typeof displayName !== "string" || !displayName.trim()) throw new StickAccountError("displayName is required", 400);
@@ -73,12 +77,16 @@ export async function setUpStickAccount(
       body: JSON.stringify(args),
     });
   let res = await call("create_account", { stick_id: stickId, display_name: displayName, role, directors: directors ?? [] });
-  if (res.status === 409) res = await call("rotate_token", { stick_id: stickId });
+  let rotated = false;
+  if (res.status === 409) {
+    rotated = true;
+    res = await call("rotate_token", { stick_id: stickId });
+  }
   if (res.status === 401 || res.status === 403) throw new StickAccountError("only a tenant admin can set up a Stick's Pulsar account", 403);
   if (!res.ok) throw new StickAccountError("Pulsar could not set up the account", 502);
   const out = (await res.json().catch(() => ({}))) as { message?: { user?: string; token?: string }; user?: string; token?: string };
   const msg = out.message ?? out;
   if (!msg.user || !msg.token) throw new StickAccountError("Pulsar did not return the account", 502);
   await saveStickToken(query, stickId, msg.user, msg.token, engineSecret);
-  return { user: msg.user };
+  return rotated ? { user: msg.user, rotated: true, note: "The account already existed, so only its token was renewed; role and directors were not changed." } : { user: msg.user };
 }
