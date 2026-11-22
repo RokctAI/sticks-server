@@ -96,7 +96,7 @@ export type KeepGoingDeps = {
   settings: () => { enabled: boolean; maxNoProgress: number; maxPerDay: number; gapSeconds: number };
   onDuty: (botId: string, at: Date) => Promise<boolean>;
   /** True while the docker (or this tenant) is being moved: nothing new is started. */
-  draining?: () => boolean;
+  draining?: (e: RunFinished) => boolean;
   /** Queues one follow-up run for the Stick with this prompt, after the delay. */
   queueFollowUp: (e: RunFinished, userId: string, prompt: string, delaySeconds: number) => Promise<void>;
   now?: () => Date;
@@ -106,7 +106,7 @@ export type KeepGoingDeps = {
 export async function keepGoingAfterRun(deps: KeepGoingDeps, e: RunFinished): Promise<string> {
   const now = deps.now?.() ?? new Date();
   if (e.outcome !== "completed") return "not completed";
-  if (deps.draining?.()) return "moving";
+  if (deps.draining?.(e)) return "moving";
   if (!(await deps.onDuty(e.botId, now))) return "resting";
   const got = await snapshotFor(deps.read, deps.query, e);
   if (!got) return "no run";
@@ -155,7 +155,8 @@ export type FollowUpDeps = {
   /** Writes a task and a queued follow-up run that wakes at `wakeAt` (durable: a restart or a move keeps it). */
   createQueuedRun: (e: RunFinished, userId: string, prompt: string, wakeAt: Date) => Promise<string>;
   enqueue: (runId: string) => Promise<void>;
-  draining: () => boolean;
+  /** The docker, or this run's tenant, is being moved. */
+  draining: (e: RunFinished) => boolean;
   schedule: (fn: () => void, ms: number) => void;
   now: () => Date;
 };
@@ -168,11 +169,11 @@ export type FollowUpDeps = {
  * on the docker that comes back.
  */
 export async function queueFollowUpDurable(d: FollowUpDeps, e: RunFinished, userId: string, prompt: string, delaySeconds: number): Promise<string | undefined> {
-  if (d.draining()) return undefined;
+  if (d.draining(e)) return undefined;
   const ms = Math.max(0, delaySeconds) * 1000;
   const runId = await d.createQueuedRun(e, userId, prompt, new Date(d.now().getTime() + ms));
   d.schedule(() => {
-    if (d.draining()) return;
+    if (d.draining(e)) return;
     void d.enqueue(runId).catch(() => undefined);
   }, ms);
   return runId;

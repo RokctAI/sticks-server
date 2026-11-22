@@ -31,7 +31,7 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
-import { DrainState, drainFlag, SiteDrainState } from "./drain.js";
+import { DrainState, SiteDrainState, drainFlag, drainingOrgs } from "./drain.js";
 import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
 import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
 import { runFinishedHooks } from "../../../packages/db/src/events.ts";
@@ -403,6 +403,14 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       scratchpad: (botId) =>
         sys(() => handles.prisma.scratchpadItem.findMany({ where: { botId, status: "open" }, select: { id: true, title: true, status: true }, take: 50 })),
     };
+    // Per-tenant drain (drain {site}): a follow-up for a tenant being moved is not written or started.
+    const orgOfSpace = new Map<string, string>();
+    const learnOrg = async (spaceId: string) => {
+      if (!orgOfSpace.has(spaceId)) {
+        const rows = (await sql(`SELECT "organizationId" AS org FROM spaces WHERE id = $1`, [spaceId])) as Array<{ org: string }>;
+        if (rows[0]) orgOfSpace.set(spaceId, rows[0].org);
+      }
+    };
     const followUps: FollowUpDeps = {
       createQueuedRun: (e, userId, prompt, wakeAt) =>
         sys(() =>
@@ -415,27 +423,28 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           }),
         ),
       enqueue: (runId) => handles.jobs.enqueue(runContinueJob(runId)).then(() => undefined),
-      draining: () => drainFlag.draining,
+      draining: (e) => drainFlag.draining || drainingOrgs.has(orgOfSpace.get(e.spaceId) ?? ""),
       schedule: (fn, ms) => setTimeout(fn, ms).unref(),
       now: () => new Date(),
     };
     const queueFollowUp = async (e: RunFinished, userId: string, prompt: string, delaySeconds: number) => {
       await queueFollowUpDurable(followUps, e, userId, prompt, delaySeconds);
     };
-    runFinishedHooks.push((e) =>
-      keepGoingAfterRun(
+    runFinishedHooks.push(async (e) => {
+      await learnOrg(e.spaceId);
+      return keepGoingAfterRun(
         {
           store: kgStore,
           query: sql,
           read,
           settings: () => settings.get().keepGoing,
           onDuty: async (botId, at) => dutyState(await duty.get(botId), at).on_duty,
-          draining: () => drainFlag.draining,
+          draining: (ev) => drainFlag.draining || drainingOrgs.has(orgOfSpace.get(ev.spaceId) ?? ""),
           queueFollowUp,
         },
         e,
-      ).then((outcome) => console.log(JSON.stringify({ msg: "keep-going", bot: e.botId, run: e.runId, outcome }))),
-    );
+      ).then((outcome) => console.log(JSON.stringify({ msg: "keep-going", bot: e.botId, run: e.runId, outcome })));
+    });
     const goalUrl = env.STICKS_ENGINE_URL?.trim().replace(/\/+$/, "");
     if (goalUrl && /^https:\/\//.test(goalUrl)) await seedBuiltinPlugin(sqlDraftRepository(sql), "goal", goalPluginDocument(goalUrl));
     handles.app.get("/internal/goal", async (c) => {

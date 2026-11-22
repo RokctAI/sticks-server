@@ -115,4 +115,10 @@ describe("follow-ups survive a sleep or move, and nothing starts during a drain"
     expect(await keepGoingAfterRun({ ...d, draining: () => true }, E)).toBe("moving");
     expect(queued).toHaveLength(0);
   });
+  it("a drain of another tenant does not stop this one; a drain of this tenant does", async () => {
+    const f = fu({ v: false });
+    f.d.draining = (e) => e.spaceId === "s-other";
+    expect(await queueFollowUpDurable(f.d, E, "u1", "go on", 60)).toBe("run1");
+    expect(await queueFollowUpDurable(f.d, { ...E, spaceId: "s-other" }, "u1", "go on", 60)).toBeUndefined();
+  });
 });
