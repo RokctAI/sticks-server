@@ -3,7 +3,7 @@ import { seal, setUpStickAccount, stickToken, unseal } from "./stick-pulsar-acco
 
 function db() {
   const rows = new Map<string, { sealed: string }>();
-  return async (sql: string, p: unknown[]) => {
+  return async (sql: string, p: unknown[] = []): Promise<unknown[]> => {
     if (sql.startsWith("CREATE")) return [];
     if (sql.startsWith("INSERT")) { rows.set(p[0] as string, { sealed: p[2] as string }); return []; }
     const r = rows.get(p[0] as string); return r ? [r] : [];
