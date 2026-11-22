@@ -8,9 +8,10 @@
 // Option --move-key <file> on both export and import: a one-off random key file the move runner makes and gives to
 // both sides. With it the tenant's Stick Pulsar tokens move too (engine-rows.ts); without it they are skipped and
 // must be rotated after the move. The engine's own rows for the tenant always move (engine-rows.ts).
-// Exit 0 on success, 1 on failure (the reason on stderr, never a secret). Encrypted content and stored secrets
-// stay encrypted with the source docker's content key, so the target docker must run with that same
-// content_key secret (copied by the move runner) or it cannot read them. Caller: control's move runner.
+// With --move-key the tenant's space keys are also re-wrapped from this docker's content_key to the target's
+// (content-rewrap.ts), so message content stays readable on a docker with another content_key. Stored connection
+// secrets (upstream's secret store) are NOT re-encrypted yet: on a docker with another content_key they must be
+// entered again. Exit 0 on success, 1 on failure (the reason on stderr, never a secret). Caller: control's move runner.
 import { readFileSync, writeFileSync } from "node:fs";
 import { createPool } from "../../../packages/db/src/client.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
@@ -43,6 +44,14 @@ function moveKeyFrom(argv: string[]): { rest: string[]; moveKey?: string } {
   return { rest: [...argv.slice(0, i), ...argv.slice(i + 2)], moveKey };
 }
 
+function contentKey(dir: string): string | undefined {
+  try {
+    return readSecret("content_key", dir);
+  } catch {
+    return undefined;
+  }
+}
+
 function engineSecret(dir: string): string | undefined {
   try {
     return readSecret("engine_secret", dir);
@@ -62,12 +71,13 @@ async function main(args: string[]): Promise<number> {
   const query = async (text: string, values: unknown[] = []) => (await client.query(text, values)).rows as unknown[];
   const exportTo = async (org: string, file: string): Promise<number> => {
     const data = await exportOrg(query, org);
-    const engine = await exportEngineRows(query, org, { engineSecret: engineSecret(dir), moveKey });
+    const engine = await exportEngineRows(query, org, { engineSecret: engineSecret(dir), moveKey, contentKey: contentKey(dir) });
     writeFileSync(file, JSON.stringify({ ...data, engine: engine.rows }), { mode: 0o600 });
     console.log(JSON.stringify({
       exported: Object.fromEntries(Object.entries(data.tables).map(([t, r]) => [t, r.length])),
       engine: Object.fromEntries(Object.entries(engine.rows).map(([t, r]) => [t, r.length])),
       skipped_stick_tokens: engine.skippedTokens,
+      space_keys_rewrapped: engine.spaceKeysRewrapped,
     }));
     return 0;
   };
@@ -92,7 +102,7 @@ async function main(args: string[]): Promise<number> {
       try {
         const data = JSON.parse(readFileSync(a, "utf8")) as Parameters<typeof importOrg>[1] & { engine?: EngineRows };
         const counts = await importOrg(query, data);
-        const engine = await importEngineRows(query, data.engine, { engineSecret: engineSecret(dir), moveKey }, ENGINE_TABLES);
+        const engine = await importEngineRows(query, data.engine, { engineSecret: engineSecret(dir), moveKey, contentKey: contentKey(dir) }, ENGINE_TABLES);
         await query("COMMIT");
         console.log(JSON.stringify({ imported: counts, engine }));
         return 0;

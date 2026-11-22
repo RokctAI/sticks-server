@@ -32,7 +32,12 @@ Exit 0 on success, 1 on failure (reason on stderr). Import runs in one transacti
 
 ## Encryption (must read)
 
-Upstream encrypts message content per space (keys in `space_keys`, wrapped by a master key derived from `ENCRYPTION_KEY`) and stores connection secrets encrypted with `ENCRYPTION_KEY` directly. Rows are copied as they are, still encrypted. **The target docker must run with the source docker's `content_key` secret**, or the moved content and secrets cannot be read. Re-encrypting under a new key is not done here.
+Upstream encrypts message content per space with data keys in `space_keys`, wrapped by a master key derived from the docker's `content_key`. A shared docker's `content_key` must never be copied to another docker.
+
+- **With `--move-key`** (on both export and import): export opens only this tenant's space keys with the source `content_key` and wraps them with the move key; import opens them with the move key and wraps them with the target docker's own `content_key` (`content-rewrap.ts`). No plain key is written to the file. Proved against upstream's own key provider: the moved key opens with the target key and not with the source key.
+- **Without `--move-key`**: space keys are copied as they are, so the target must have the same `content_key`. The move runner must refuse a move between dockers with different content keys unless it passes `--move-key`.
+- A space key wrapped by any master key other than the derived one (`ENCRYPTION_MASTER_KEYS` or a key manager) is refused, so nothing moves unreadable.
+- **Not re-encrypted yet:** stored connection secrets (upstream's secret store, encrypted with `content_key` directly). On a docker with another `content_key` they must be entered again.
 
 ## Not moved
 
