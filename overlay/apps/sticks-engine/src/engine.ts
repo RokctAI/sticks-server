@@ -30,6 +30,8 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
+import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
+import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
 
@@ -235,6 +237,23 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     }
   }
 
+  // Hub feature switches (Ray 11-22). Pulsar posts the hub's resolved switches with the engine secret whenever they
+  // change (core#1630); signed-in people and the engine read them. Everything is on until the hub says otherwise.
+  await sql(FEATURES_TABLE_SQL, []);
+  handles.app.post("/internal/features", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (secret === undefined || !bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ features: await saveFeatures(sql, await c.req.json().catch(() => ({}))) });
+  });
+  handles.app.get("/internal/features", async (c) => {
+    const secret = engineSecretFrom(dir);
+    const bySecret = secret !== undefined && bearerMatches(c.req.header("authorization"), secret);
+    const raw = sessionTokenFrom(c.req.raw.headers);
+    const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
+    if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ features: await readFeatures(sql) });
+  });
+
   // Stick reactions (Ray 11-21). A Stick reacts through the built-in "reactions" plugin (needs STICKS_ENGINE_URL
   // https); the app reads GET /internal/reactions?thread=ID[&since=ISO] and buzzes on a new one while the chat is open.
   {
@@ -263,6 +282,66 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       const thread = c.req.query("thread");
       if (!thread) return c.json({ error: "thread is required" }, 400);
       return c.json({ reactions: await listReactions(sql, thread, c.req.query("since") || undefined) });
+    });
+
+    // Record cards (Ray 11-21). The Stick asks with the engine secret (built-in "record-confirm" plugin); the app
+    // lists GET /internal/record-requests?thread=ID[&since=ISO] and answers POST /internal/record-requests/answer
+    // {requestId, decision} as the signed-in person. Answering twice is a no-op.
+    if (engineUrl && /^https:\/\//.test(engineUrl)) await seedBuiltinPlugin(sqlDraftRepository(sql), "record-confirm", recordConfirmPluginDocument(engineUrl));
+    const sessionUser = async (c: { req: { raw: Request } }) => {
+      const raw = sessionTokenFrom(c.req.raw.headers);
+      if (!raw) return undefined;
+      const rows = (await sql(`SELECT "userId" FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as Array<{ userId: string }>;
+      if (!rows[0] || (await isGuestSession(sql, raw))) return undefined;
+      return rows[0].userId;
+    };
+    // Record content (customer names, totals) is for the engine secret or a non-guest member, never a guest.
+    const recordReader = async (c: { req: { header: (n: string) => string | undefined; raw: Request } }) => {
+      const secret = engineSecretFrom(dir);
+      if (secret !== undefined && bearerMatches(c.req.header("authorization"), secret)) return true;
+      return (await sessionUser(c)) !== undefined;
+    };
+    const recordError = (error: unknown) => {
+      if (error instanceof RecordRequestError) return { body: { error: error.message }, status: error.status };
+      throw error;
+    };
+    handles.app.post("/internal/record-requests/answer", async (c) => {
+      const user = await sessionUser(c);
+      if (!user) return c.json({ error: "unauthorized" }, 401);
+      const body = (await c.req.json().catch(() => ({}))) as { requestId?: unknown; decision?: unknown };
+      try {
+        return c.json({ ok: true, request: await answerRecordRequest(sql, body.requestId, body.decision, user) });
+      } catch (error) {
+        const e = recordError(error);
+        return c.json(e.body, e.status);
+      }
+    });
+    handles.app.post("/internal/record-requests", async (c) => {
+      const secret = engineSecretFrom(dir);
+      if (secret === undefined || !bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+      try {
+        return c.json({ request: await createRecordRequest(sql, (await c.req.json().catch(() => ({}))) as Record<string, unknown>) });
+      } catch (error) {
+        const e = recordError(error);
+        return c.json(e.body, e.status);
+      }
+    });
+    handles.app.get("/internal/record-requests/:requestId", async (c) => {
+      if (!(await recordReader(c))) return c.json({ error: "unauthorized" }, 401);
+      try {
+        return c.json({ request: await getRecordRequest(sql, c.req.param("requestId")) });
+      } catch (error) {
+        const e = recordError(error);
+        return c.json(e.body, e.status);
+      }
+    });
+    handles.app.get("/internal/record-requests", async (c) => {
+      if (!(await recordReader(c))) return c.json({ error: "unauthorized" }, 401);
+      const thread = c.req.query("thread");
+      if (!thread) return c.json({ error: "thread is required" }, 400);
+      const since = c.req.query("since");
+      if (since && Number.isNaN(Date.parse(since))) return c.json({ error: "since must be a date" }, 400);
+      return c.json({ requests: await listRecordRequests(sql, thread, c.req.query("since") || undefined) });
     });
   }
 
