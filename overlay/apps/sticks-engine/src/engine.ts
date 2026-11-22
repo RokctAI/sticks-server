@@ -12,7 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
-import { loadTenants, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
+import { knownTenant, loadTenants, tenantBySite, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
 import { sqlDraftRepository } from "./plugin-draft-store.js";
@@ -31,7 +31,7 @@ import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
 import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK_TOKENS_TABLE_SQL, validStickId } from "./stick-pulsar-accounts.js";
-import { DrainState } from "./drain.js";
+import { DrainState, SiteDrainState } from "./drain.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
@@ -294,14 +294,38 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
       const s = engineSecretFrom(dir);
       return s !== undefined && bearerMatches(h, s);
     };
+    const siteDrain = new SiteDrainState(sql);
+    await siteDrain.load();
+    // {site}: only that tenant (many tenants, tenants.ts). {} or no body: the whole engine, as before.
+    const siteOf = async (c: { req: { json: () => Promise<unknown> } }) => {
+      const body = (await c.req.json().catch(() => ({}))) as { site?: unknown };
+      if (body.site === undefined) return { site: undefined };
+      if (typeof body.site !== "string" || !body.site) return { error: "site must be a non-empty string" as const, status: 400 as const };
+      const t = knownTenant(body.site) ?? (await tenantBySite(sql, body.site));
+      return t ? { site: body.site, tenant: t } : { error: "unknown site" as const, status: 404 as const };
+    };
     handles.app.post("/internal/drain", async (c) => {
       if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      const s = await siteOf(c);
+      if ("error" in s) return c.json({ error: s.error }, s.status);
+      if (s.tenant) {
+        await siteDrain.set(s.site, s.tenant.orgId, true);
+        const inputs = await readIdleInputs(handles.prisma, new Date(), () => openStreams.value, () => liveScripts.value, s.tenant.orgId);
+        return c.json({ draining: true, site: s.site, active_runs: inputs.activeRuns });
+      }
       await drain.set(true);
       const inputs = await readIdleInputs(handles.prisma, new Date(), () => openStreams.value, () => liveScripts.value);
       return c.json({ draining: true, active_runs: inputs.activeRuns });
     });
     handles.app.post("/internal/resume", async (c) => {
       if (!bySecret(c.req.header("authorization"))) return c.json({ error: "unauthorized" }, 401);
+      const s = await siteOf(c);
+      if ("error" in s) return c.json({ error: s.error }, s.status);
+      if (s.tenant) {
+        await siteDrain.set(s.site, s.tenant.orgId, false);
+        await loadTenants(sql); // a tenant just imported from another docker becomes known for sign-in
+        return c.json({ draining: false, site: s.site });
+      }
       await drain.set(false);
       return c.json({ draining: false });
     });
@@ -503,6 +527,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
   // Open streams are counted at the front door and running sandbox commands in the helper client (activity.ts).
   // Every change to either re-checks idle and pushes a change to Pulsar at once; nothing polls.
   const idle = new IdleTracker();
+  const siteIdle = new Map<string, IdleTracker>();
   const streams = () => openStreams.value;
   const scripts = () => liveScripts.value;
   handles.app.get("/internal/idle", async (c) => {
@@ -510,6 +535,14 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     if (!secret) return c.json({ error: "engine secret not provisioned" }, 503);
     if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
     const now = new Date();
+    const site = c.req.query("site");
+    if (site !== undefined) {
+      const t = knownTenant(site) ?? (await tenantBySite(sql, site));
+      if (!t) return c.json({ error: "unknown site" }, 404);
+      let tracker = siteIdle.get(site);
+      if (!tracker) siteIdle.set(site, (tracker = new IdleTracker()));
+      return c.json(tracker.update(await readIdleInputs(handles.prisma, now, streams, scripts, t.orgId), now).snapshot);
+    }
     const inputs = await readIdleInputs(handles.prisma, now, streams, scripts);
     return c.json(idle.update(inputs, now).snapshot);
   });
