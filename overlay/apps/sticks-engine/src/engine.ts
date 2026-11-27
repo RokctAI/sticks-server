@@ -12,6 +12,7 @@ import { activeChatsWhere } from "./end-of-day-adapters.js";
 import { ensurePluginDraftTable } from "./plugin-draft-store.js";
 import { GUEST_TABLE_SQL } from "./pulsar-session.js";
 import { applyStickDefaults, ensureTenantSpace } from "./first-boot.js";
+import { ensureInboxWatch, ensureMorningBrief, tenantTimezone } from "./lead-stick.js";
 import { hasSharedTenants, knownTenant, loadTenants, pulsarSiteForStick, tenantBySite, registerLegacyTenant, registerTenant, TenantConflictError, TenantError } from "./tenants.js";
 import { pullSettings, SettingsError, SettingsStore } from "./settings.js";
 import { callHub, OnboardingError, onboardingEnabled, onboardingPluginDocument, readOnboardingToken, saveOnboardingToken, type OnboardingTool } from "./hub-onboarding.js";
@@ -37,7 +38,7 @@ import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } 
 import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
 import { runFinishedHooks } from "../../../packages/db/src/events.ts";
 import { runAsSystem } from "../../../packages/db/src/row-security.ts";
-import { runContinueJob } from "../../../packages/adapter-kit/src/index.ts";
+import { routineWakeupJob, runContinueJob } from "../../../packages/adapter-kit/src/index.ts";
 import { KeepGoingStore } from "./keep-going.js";
 import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, queueFollowUpDurable, readGoal, setGoal, type FollowUpDeps, type RunFinished, type SnapshotReader } from "./keep-going-wiring.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
@@ -164,6 +165,20 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     onError: (error) => logger.error("boot scheduler error (boot pass or end of day)", error),
   });
   await scheduler.ready;
+
+  // The lead Stick's morning brief (owner's ruling of 27 Nov; lead-stick.ts): added once, re-checked with the
+  // defaults pass so a tenant's first Stick gets it soon after it is made.
+  const briefZone = tenantTimezone(env, offset);
+  const wakeRoutine = (id: string, at: Date) => handles.jobs.enqueue(routineWakeupJob(id, at));
+  // The inbox watch follows once the owner connects Gmail; the 15-minute pass picks that up.
+  const ensureBrief = () =>
+    Promise.all([
+      ensureMorningBrief(sql, briefZone, wakeRoutine).catch((error) => logger.error("morning brief setup failed", error)),
+      ensureInboxWatch(sql, briefZone, wakeRoutine).catch((error) => logger.error("inbox watch setup failed", error)),
+    ]);
+  await ensureBrief();
+  const briefTimer = setInterval(() => void ensureBrief(), 15 * 60_000);
+  briefTimer.unref();
 
   // Settings from Pulsar (brief task 11): stored settings first, then a pull from STICKS_SETTINGS_URL when set.
   // A failed pull keeps the stored settings. Pulsar also pushes changes to POST /internal/settings.
@@ -731,6 +746,7 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     stop: async () => {
       scheduler.stop();
       clearInterval(defaultsTimer);
+      clearInterval(briefTimer);
       offStreams();
       offScripts();
       await stopUpstream();
