@@ -1,0 +1,109 @@
+diff --git a/apps/web/src/lib/tool-activity-view.test.ts b/apps/web/src/lib/tool-activity-view.test.ts
+index 9e36972..34d83d2 100644
+--- a/apps/web/src/lib/tool-activity-view.test.ts
++++ b/apps/web/src/lib/tool-activity-view.test.ts
+@@ -25,6 +25,8 @@ describe("tool card render decisions", () => {
+   it("renders only steps blocks, and only when the preference is on", () => {
+     expect(shouldRenderToolCard(stepsBlock, true)).toBe(true);
+     expect(shouldRenderToolCard(stepsBlock, false)).toBe(false);
++    // An empty steps block only carries a no-tool turn's time: no card.
++    expect(shouldRenderToolCard({ kind: "steps", steps: [], durationMs: 7_400 }, true)).toBe(false);
+     expect(shouldRenderToolCard(textBlock, true)).toBe(false);
+     expect(shouldRenderToolCard(liveActivity, true)).toBe(false);
+   });
+diff --git a/apps/web/src/lib/tool-activity-view.ts b/apps/web/src/lib/tool-activity-view.ts
+index a95964d..c63a45d 100644
+--- a/apps/web/src/lib/tool-activity-view.ts
++++ b/apps/web/src/lib/tool-activity-view.ts
+@@ -11,7 +11,8 @@ export function toolStepCount(steps: readonly { count: number }[]): number {
+  * A `progress` block marked `activity: true` never renders, in either mode.
+  */
+ export function shouldRenderToolCard(block: MessageBlock, showToolActivity: boolean): boolean {
+-  return showToolActivity && block.kind === "steps";
++  // An empty steps block only carries a turn's time (a turn with no tools): nothing to show as a card.
++  return showToolActivity && block.kind === "steps" && block.steps.length > 0;
+ }
+ 
+ /** Blocks that survive into a message render. */
+diff --git a/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql b/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql
+new file mode 100644
+index 0000000..af2de9f
+--- /dev/null
++++ b/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql
+@@ -0,0 +1,4 @@
++-- Sole statement so it runs outside an implicit transaction. The index is rebuilt in the next migration: a
++-- turn with no tools now carries an empty steps block (it only holds the turn time), so "used tools" means
++-- a steps block that has at least one step.
++DROP INDEX CONCURRENTLY IF EXISTS "messages_tool_work_idx";
+diff --git a/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql b/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql
+new file mode 100644
+index 0000000..d5b8a63
+--- /dev/null
++++ b/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql
+@@ -0,0 +1,4 @@
++-- Sole statement so the index builds outside an implicit transaction, without blocking chat writes.
++-- Replies that used tools: a steps block with at least one step (see the previous migration).
++CREATE INDEX CONCURRENTLY "messages_tool_work_idx" ON "messages" ("threadId", "seq")
++WHERE "role" = 'bot' AND jsonb_path_exists("blocks", '$[*] ? (@.kind == "steps" && @.steps.size() > 0)');
+diff --git a/packages/db/src/events.test.ts b/packages/db/src/events.test.ts
+index 8a59dda..b49e6ad 100644
+--- a/packages/db/src/events.test.ts
++++ b/packages/db/src/events.test.ts
+@@ -98,6 +98,20 @@ describe("finalizeRun", () => {
+     expect(completedRunBlocks(blocks, null, new Date())).toBe(blocks);
+   });
+ 
++  it("stamps a turn that used no tools with an empty steps block that carries the time", () => {
++    const blocks = [{ kind: "text" as const, text: "Hello." }];
++
++    expect(
++      completedRunBlocks(
++        blocks,
++        new Date("2026-09-01T12:00:00.000Z"),
++        new Date("2026-09-01T12:00:07.400Z"),
++      ),
++    ).toEqual([blocks[0], { kind: "steps", steps: [], durationMs: 7_400 }]);
++    const none: typeof blocks = [];
++    expect(completedRunBlocks(none, new Date("2026-09-01T12:00:00.000Z"), new Date("2026-09-01T12:00:07.400Z"))).toBe(none);
++  });
++
+   it.each(["completed", "failed"] as const)(
+     "retries a transaction conflict and clears the checkpoint on %s without duplicating the terminal event or notification",
+     async (outcome) => {
+diff --git a/packages/db/src/events.ts b/packages/db/src/events.ts
+index ff13014..a2654ea 100644
+--- a/packages/db/src/events.ts
++++ b/packages/db/src/events.ts
+@@ -726,7 +726,13 @@ export function completedRunBlocks(
+   const durationMs = completedAt.getTime() - startedAt.getTime();
+   if (!Number.isFinite(durationMs) || durationMs < 0) return blocks;
+   const index = blocks.findLastIndex((block) => block.kind === "steps");
+-  if (index < 0) return blocks;
++  // A turn that used no tools has no steps block yet. Give it an empty one that carries the time, so every
++  // turn shows how long it took (the Sticks app reads durationMs from any steps block).
++  if (index < 0) {
++    // A run that saved no reply at all stays without a message.
++    if (blocks.length === 0) return blocks;
++    return [...blocks, { kind: "steps", steps: [], durationMs: Math.round(durationMs) }];
++  }
+   return blocks.map((block, blockIndex) =>
+     blockIndex === index && block.kind === "steps"
+       ? { ...block, durationMs: Math.round(durationMs) }
+diff --git a/packages/db/src/history-retrieval.ts b/packages/db/src/history-retrieval.ts
+index 6ef13ff..89096b5 100644
+--- a/packages/db/src/history-retrieval.ts
++++ b/packages/db/src/history-retrieval.ts
+@@ -138,8 +138,11 @@ const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
+   '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result')::text || translate(jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "file" || @.kind == "image").name')::text, '._-', '   ') || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].label')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].note')::text`;
+ const columns = Prisma.sql`m.id, m.seq, m.role, m."runId", m."replyToMessageId", m."createdAt", m.blocks, m."threadId", t."groupId" AS "groupId"`;
+ 
+-/** Replies that used tools; matches the predicate of messages_tool_work_idx exactly. */
+-const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps")')`;
++/**
++ * Replies that used tools; matches the predicate of messages_tool_work_idx exactly. An empty steps block only
++ * carries a turn's time (a turn with no tools), so it does not count.
++ */
++const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps" && @.steps.size() > 0)')`;
+ function visible(scope: HistoryScope, myChats = false, targetThreadId?: string): Prisma.Sql {
+   // Match loadRunHistoryMessages: only an unassigned row for this bot means waiting.
+   // Cross-chat direct threads use their owning bot; groups retain the reading bot.
