@@ -363,9 +363,11 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
   - read actions run freely, and write actions ask for approval (`packages/core/src/action-approval.ts`);
   - credentials are never sent to the model;
   - the call leaves from the engine, never from the sandbox.
-- Who writes new plugins is now decided: task 21 (a Stick skill).
+- Who writes new plugins: we do (task 21, a Stick skill, was removed 11-27).
 
-### Task 21: plugin builder skill (owner's ruling 11-15, settles spec §4.7's open point; needs 20)
+### Task 21: plugin builder skill (REMOVED 11-27 on the owner's word: Sticks no longer builds plugins; do not build this)
+_Original text, kept for the record:_
+### Task 21 (original): plugin builder skill (owner's ruling 11-15, settles spec §4.7's open point; needs 20)
 - Sticks can write a plugin for us when none exists. Add a built-in skill "Build a plugin" to the engine.
 - Input: the service name and its API docs (OpenAPI or GraphQL URL, or its API reference). Output: a connector description (OpenAPI/GraphQL file, read actions free, write actions need approval) saved as a draft plugin in the tenant.
 - The draft is never live until a tenant admin approves it (task 20's approval path). Credentials are entered by the admin, never seen by the model.
@@ -379,7 +381,8 @@ Do each as its own draft PR. After each one, record the idle RSS [measured] from
 - Installed and enabled by default in every tenant (still needs the user's token to work).
 - Tests: the plugin loads; a read call goes out with the credential header; a write call asks for approval.
 
-### Update 11-17: plugin build requests (amends tasks 21 and 22; the wording above is kept unchanged)
+### Update 11-17: plugin build requests (REMOVED 11-27: the build-request flow below is no longer wanted; GitHub seeding in task 22 stays)
+_Original heading:_ Update 11-17: plugin build requests (amends tasks 21 and 22; the wording above is kept unchanged)
 Settled 11-20 (the six decisions below are accepted; change them only if the owner says so).
 
 Principle: we build our own plugins and do not depend on third-party connectors. GitHub is the first built-in. The tenant wants a task done; a connector is only the means.
