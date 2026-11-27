@@ -8,3 +8,4 @@
 0005-catalogue-through-gateway.patch
 0006-run-finished-hooks-and-routine-gates.patch
 0007-remove-building-a-plugin-docs-entry.patch
+0008-stamp-turn-time-on-every-reply.patch
