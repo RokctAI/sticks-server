@@ -103,6 +103,67 @@ def other_counts(counts: dict[str, int]) -> list[str]:
     return ["## Rest of the repo", "", "; ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])) + " files changed.", ""]
 
 
+LEFT_OUT_REPO = "RokctAI/agent"
+LEFT_OUT_PATH = "docs/sticks/left-out-on-purpose.md"
+
+
+def fetch_left_out() -> str:
+    """The Sticks app's list of Rakazo features left out on purpose (read with GH_TOKEN); empty when unreadable."""
+    try:
+        out = subprocess.run(["gh", "api", f"repos/{LEFT_OUT_REPO}/contents/{LEFT_OUT_PATH}",
+                              "-H", "Accept: application/vnd.github.raw"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+GENERIC_ACTIONS = {"events", "review", "submissions", "screen", "list", "get", "state"}
+
+
+def _key(action: str) -> str:
+    """`billing/*` -> billing; `bots/importPreview` -> import (a whole group only when the cell says *)."""
+    group, _, name = action.partition("/")
+    word = re.match(r"[a-z]+", name or "")
+    if name == "*" or not word or word.group(0) in GENERIC_ACTIONS:
+        return group.lower()
+    return word.group(0)
+
+
+def left_out_features(text: str) -> list[tuple[str, list[str]]]:
+    """Table rows of the list: (feature, keywords). Keywords are the first part of each `group/action` cell."""
+    rows = []
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or not line.lstrip().startswith("|") or set(cells[0]) <= set("-: "):
+            continue
+        keys = sorted({_key(k) for k in re.findall(r"`([^`]+)`", cells[1]) if "/" in k})
+        if keys:
+            rows.append((cells[0], keys))
+    return rows
+
+
+def _segments(path: str) -> set[str]:
+    return {seg.lower() for seg in re.split(r"[/._-]", path) if seg}
+
+
+def left_out_section(changes: list[tuple[str, str]], text: str) -> list[str]:
+    """Changed files that belong to a feature the app leaves out on purpose: skipped, not a gap."""
+    where = f"{LEFT_OUT_REPO} `{LEFT_OUT_PATH}`"
+    if not text:
+        return ["## Left out on purpose", "", f"Could not read {where}; check it by hand before planning app work.", ""]
+    hits = []
+    for feature, keys in left_out_features(text):
+        files = [path for _, path in changes if _segments(path) & set(keys)]
+        if files:
+            hits.append(f"| {feature.replace('|', '/')} | {', '.join(keys)} | {len(files)} |")
+    lines = ["## Left out on purpose", "", f"Also check {where}: changes to these features are skipped on purpose, not gaps."]
+    if hits:
+        lines += ["", "| Feature (skipped on purpose) | Matched | Files |", "|---|---|---|"] + hits
+    else:
+        lines += ["", "No changed file matches a listed feature."]
+    return lines + [""]
+
+
 def report(old: str, new: str, changes: list[tuple[str, str]], patch_lines: list[str] | None = None,
            notes: dict[tuple[str, str], list[str]] | None = None) -> str:
     if not changes:
@@ -162,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         patch_titles = git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", *[p for _, p in touched]).splitlines() if touched else []
         summary = ["## Fixes and features", "", split_counts("apps/", app_titles), split_counts("files our patches touch", patch_titles),
                    "", "Fixes are listed first everywhere below. A title counts as a fix when it says fix, bug, security, crash, regression, leak or revert.", ""]
+        summary += left_out_section(changes, fetch_left_out())  # type: ignore[arg-type]
         text = report(old, new, changes, summary + patch_section(touched, patched, {path: git(a.repo, "log", "--no-merges", "--format=%s", f"{old}..{new}", "--", path).splitlines() for _, path in touched}) + other_counts(rest), notes)  # type: ignore[arg-type]
         changed = bool(changes) or bool(touched)
     if a.out:

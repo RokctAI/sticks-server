@@ -1,5 +1,6 @@
 # Weekly: list which parts of upstream's apps/ changed since the release our Dart app last caught up with
 # ("upstream" in the Sticks app's version.json, read with the MONOREPO_PAT org secret). Watch only: nothing is synced into this repo (we fork once, see the brief).
+# Changes to features the app leaves out on purpose (RokctAI/agent docs/sticks/left-out-on-purpose.md) are marked skipped, not gaps.
 name: Upstream apps changes
 on:
   schedule:
