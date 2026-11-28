@@ -76,7 +76,7 @@ index 880cb2d..57ec193 100644
    const guardedInNeverAsk = name === "respond_agent_connection";
    const resolvedRules = resolveActionApprovalForTools({
 diff --git a/packages/adapters/src/run-tools.ts b/packages/adapters/src/run-tools.ts
-index 93f4ba3..67d2795 100644
+index 93f4ba3..42d0a83 100644
 --- a/packages/adapters/src/run-tools.ts
 +++ b/packages/adapters/src/run-tools.ts
 @@ -1,5 +1,16 @@
@@ -97,7 +97,7 @@ index 93f4ba3..67d2795 100644
  import { isTerminatingReplyResult } from "./approval-effect.js";
  import { IMAGE_RETURNING_COMPUTER_TOOLS, MODEL_CANNOT_SEE_MESSAGE } from "./model-vision.js";
  import type { RunContext } from "./run-context.js";
-@@ -83,13 +94,55 @@ export async function applyTool(
+@@ -83,13 +94,58 @@ export async function applyTool(
      const { bot_id: _self, ...own } = args;
      args = own;
    }
@@ -147,7 +147,10 @@ index 93f4ba3..67d2795 100644
 +async function cleanOutsideResult<T>(ctx: RunContext, mailName: string, result: T): Promise<T> {
 +  let value = stripHiddenFromResult(result).value;
 +  if (/mail|gmail|outlook|inbox|imap|message/i.test(mailName)) {
-+    if (!ownerAskedForSpam(await ctx.trust.loadOwnerWords())) value = dropSpamMessages(value).value;
++    // Owner words are loaded only when spam is actually present in the result.
++    const withoutSpam = dropSpamMessages(value);
++    if (withoutSpam.dropped > 0 && !ownerAskedForSpam(await ctx.trust.loadOwnerWords()))
++      value = withoutSpam.value;
 +    // Ray 2026-11-28: say plainly when an email's From is not backed by its signed checks.
 +    value = addSenderChecks(value).value;
 +    value = blockAttachments(value).value;
@@ -199,10 +202,10 @@ index 9ee47db..82bd4fd 100644
  }
 diff --git a/packages/core/src/hidden-text.test.ts b/packages/core/src/hidden-text.test.ts
 new file mode 100644
-index 0000000..cb0682b
+index 0000000..a6fc49a
 --- /dev/null
 +++ b/packages/core/src/hidden-text.test.ts
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,90 @@
 +import { describe, expect, it } from "vitest";
 +import { linkCameFromOutside, linksIn, stripHiddenFromResult, stripHiddenText } from "./hidden-text.js";
 +import { addSenderChecks } from "./mail-sender-check.js";
@@ -255,6 +258,8 @@ index 0000000..cb0682b
 +    expect(mailCallTargetsSpam("GMAIL_FETCH_EMAILS", { query: "in:spam" })).toBe(true);
 +    expect(mailCallTargetsSpam("GMAIL_FETCH_EMAILS", { query: "in:inbox" })).toBe(false);
 +    expect(mailCallTargetsSpam("web_search", { query: "spam" })).toBe(false);
++    expect(mailCallTargetsSpam("GMAIL_SEND_EMAIL", { body: "please bin the junk" })).toBe(false);
++    expect(mailCallTargetsSpam("GMAIL_LIST", { labelIds: ["SPAM"] })).toBe(true);
 +    expect(ownerAskedForSpam("check my junk folder")).toBe(true);
 +    const r = dropSpamMessages({ messages: [{ id: 1, labelIds: ["INBOX"] }, { id: 2, labelIds: ["SPAM"] }] });
 +    expect(r.dropped).toBe(1);
@@ -591,10 +596,10 @@ index 0000000..423db04
 +}
 diff --git a/packages/core/src/mail-spam.ts b/packages/core/src/mail-spam.ts
 new file mode 100644
-index 0000000..a89b9cf
+index 0000000..0de6d74
 --- /dev/null
 +++ b/packages/core/src/mail-spam.ts
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,153 @@
 +// Sticks (sticks-server patch 0010): a Stick does not read Spam or Junk. Those folders are where
 +// hostile mail lands, so a mail tool call that asks for them is refused unless the owner's own
 +// words in this run name spam or junk, and messages a mail tool returns that carry a spam or junk
@@ -603,6 +608,7 @@ index 0000000..a89b9cf
 +const MAIL_TOOL = /mail|gmail|outlook|inbox|imap|message/i;
 +const SPAM_WORD = /\b(spam|junk|bulk mail|junk e-?mail)\b/i;
 +const SPAM_ARG = /(^|[\s:"'(\/_-])(spam|junk|junkemail|bulk)([\s"')\/_-]|$)/i;
++const FOLDER_KEY = /^(q|query|search|filter|label|labels|label_?ids?|folder|folder_?(id|name)|mailbox|box|category|categories|in)$/i;
 +const SPAM_LABEL = /^(spam|junk|junkemail|junk e-?mail|bulk)$/i;
 +
 +export function isMailTool(toolName: string): boolean {
@@ -617,17 +623,19 @@ index 0000000..a89b9cf
 +/** A mail call whose arguments point at Spam or Junk (a query like in:spam, a label or folder). */
 +export function mailCallTargetsSpam(toolName: string, args: unknown): boolean {
 +  if (!isMailTool(toolName)) return false;
++  // Only search and folder arguments count, so an email body that says "junk" is not refused.
 +  let found = false;
-+  const walk = (v: unknown, depth: number) => {
++  const walk = (v: unknown, depth: number, key: string) => {
 +    if (found || depth > 8) return;
 +    if (typeof v === "string") {
-+      if (SPAM_ARG.test(v)) found = true;
++      if (FOLDER_KEY.test(key) && SPAM_ARG.test(v)) found = true;
 +      return;
 +    }
-+    if (v && typeof v === "object")
-+      for (const x of Array.isArray(v) ? v : Object.values(v as Record<string, unknown>)) walk(x, depth + 1);
++    if (Array.isArray(v)) for (const x of v) walk(x, depth + 1, key);
++    else if (v && typeof v === "object")
++      for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, depth + 1, k);
 +  };
-+  walk(args, 0);
++  walk(args, 0, "");
 +  return found;
 +}
 +
