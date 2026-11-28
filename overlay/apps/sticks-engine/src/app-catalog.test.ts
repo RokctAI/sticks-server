@@ -24,7 +24,7 @@ describe("app catalog", () => {
     ] });
     expect(saved.entries.map((e) => e.id)).toEqual(["google", "logo"]);
     expect(JSON.stringify(await readCatalog(q))).not.toMatch(/secret|token/);
-    expect(saved.entries[1].logo).toBeUndefined();
+    expect(saved.entries[1]?.logo).toBeUndefined();
   });
   it("a new push replaces the old list", async () => {
     const q = db();
