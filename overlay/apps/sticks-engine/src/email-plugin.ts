@@ -8,7 +8,7 @@ import { draftFromOpenApi } from "./plugin-builder.js";
 import type { DraftRepository } from "./plugin-draft-store.js";
 
 export const EMAIL_PLUGIN_NAME = "email";
-export const EMAIL_OPS = ["search", "read", "send"] as const;
+export const EMAIL_OPS = ["search", "read", "send", "folders", "senders", "unsubscribe", "move"] as const;
 
 export function emailPluginDocument(engineUrl: string): unknown {
   const q = (name: string, type: string, description: string, required = false) => ({ name, in: "query", required, schema: { type }, description });
@@ -37,10 +37,55 @@ export function emailPluginDocument(engineUrl: string): unknown {
           responses: { "200": { description: "The email" } },
         },
       },
+      "/internal/email/folders": {
+        get: {
+          operationId: "email_folders",
+          summary: "List the mailbox folders (find Sent and Archive)",
+          responses: { "200": { description: "Folders" } },
+        },
+      },
+      "/internal/email/senders": {
+        get: {
+          operationId: "email_senders",
+          summary:
+            "Skill 'bulk unsubscribe' and 'tidy my inbox', only when the person asks: who sends the most of the newest emails, with each sender's uids and unsubscribe option. Show the person a short list and let them pick; never act on all by yourself.",
+          parameters: [q("folder", "string", "Folder, default INBOX"), q("limit", "integer", "How many newest emails to scan, at most 200")],
+          responses: { "200": { description: "Senders, most first" } },
+        },
+      },
+      "/internal/email/unsubscribe": {
+        post: {
+          operationId: "email_unsubscribe",
+          summary:
+            "Skill 'bulk unsubscribe': unsubscribe from the list one email (uid) came from. One call per sender the person picked; each asks for approval. If the reply is open_link, give the person the link.",
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema: { type: "object", required: ["uid"], properties: { uid: { type: "string" }, folder: { type: "string" } } } } },
+          },
+          responses: { "200": { description: "Unsubscribed, or a link to open" } },
+        },
+      },
+      "/internal/email/move": {
+        post: {
+          operationId: "email_move",
+          summary:
+            "Skill 'tidy my inbox': move the emails the person agreed to (uids from email_senders or email_search) into a folder such as Archive, in one call. Nothing is deleted.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { type: "object", required: ["uids", "to_folder"], properties: { uids: { type: "array", items: { type: "string" } }, to_folder: { type: "string" }, folder: { type: "string" } } },
+              },
+            },
+          },
+          responses: { "200": { description: "Moved" } },
+        },
+      },
       "/internal/email/send": {
         post: {
           operationId: "email_send",
-          summary: "Send an email from the person's mailbox",
+          summary:
+            "Send an email from the person's mailbox. Skill 'draft a reply in my style': first read a few of the person's own emails in the Sent folder (email_folders, email_search, email_read) and write the reply in the same tone, length and sign-off; show the draft, then send (asks for approval).",
           requestBody: {
             required: true,
             content: {
@@ -60,10 +105,15 @@ export function emailPluginDocument(engineUrl: string): unknown {
   };
 }
 
-/** Seeds the plugin once as a draft; an admin switches it on. */
+/**
+ * Seeds the plugin as a draft; an admin switches it on. When the stored copy is missing operations this version
+ * adds (the skills of 11-28), it is refreshed and keeps its status, so an approved plugin stays approved.
+ */
 export async function seedEmailPlugin(repo: DraftRepository, engineUrl: string): Promise<boolean> {
-  if (await repo.get(EMAIL_PLUGIN_NAME)) return false;
-  await repo.put(draftFromOpenApi(EMAIL_PLUGIN_NAME, emailPluginDocument(engineUrl)));
+  const fresh = draftFromOpenApi(EMAIL_PLUGIN_NAME, emailPluginDocument(engineUrl));
+  const stored = await repo.get(EMAIL_PLUGIN_NAME);
+  if (stored && stored.operations.length >= fresh.operations.length) return false;
+  await repo.put(stored ? { ...fresh, status: stored.status } : fresh);
   return true;
 }
 
@@ -71,6 +121,10 @@ const ALLOWED: Record<(typeof EMAIL_OPS)[number], { method: "GET" | "POST"; fiel
   search: { method: "GET", fields: ["query", "folder", "limit", "unread_only"] },
   read: { method: "GET", fields: ["uid", "folder"] },
   send: { method: "POST", fields: ["to", "subject", "body", "cc", "in_reply_to"] },
+  folders: { method: "GET", fields: [] },
+  senders: { method: "GET", fields: ["folder", "limit"] },
+  unsubscribe: { method: "POST", fields: ["uid", "folder"] },
+  move: { method: "POST", fields: ["uids", "to_folder", "folder"] },
 };
 
 export class EmailProxyError extends Error {
