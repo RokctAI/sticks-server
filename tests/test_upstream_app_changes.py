@@ -76,3 +76,23 @@ class PatchOverlapTest(unittest.TestCase):
         self.assertEqual(u.fixes_first(["Add x", "fix(api): y"]), ["[fix] fix(api): y", "[feature] Add x"])
         self.assertNotIn("apps/web/b.ts", text)
         self.assertIn("No upstream change", "\n".join(u.patch_section([], patched)))
+
+
+LEFT_OUT = """| Rakazo feature | Server actions | Why left out |
+|---|---|---|
+| Billing, plans | `billing/*` | Rokct Pay replaces it. |
+| Desktop updater | `updater/*` | Own builds. |
+| Mac builds | n/a | Android and Windows only. |
+"""
+
+
+def test_left_out_marks_listed_features_as_skipped():
+    changes = [("M", "apps/web/src/billing/plan.tsx"), ("M", "apps/api/src/routes/updater.ts"), ("M", "apps/mobile/app/chat.tsx")]
+    text = "\n".join(m.left_out_section(changes, LEFT_OUT))
+    assert "| Billing, plans | billing | 1 |" in text
+    assert "| Desktop updater | updater | 1 |" in text
+    assert "Mac builds" not in text and "docs/sticks/left-out-on-purpose.md" in text
+
+
+def test_left_out_unreadable_says_check_by_hand():
+    assert "check it by hand" in "\n".join(m.left_out_section([("M", "apps/web/x.ts")], ""))
