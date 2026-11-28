@@ -12,6 +12,7 @@ aiConsent/status
 approvalRules/list
 approvalRules/remove
 approvalRules/set
+artifacts/create
 artifacts/getById
 artifacts/listSpace
 artifacts/listVersions
@@ -54,6 +55,7 @@ connections/begin
 connections/catalog
 connections/complete
 connections/list
+connections/revoke
 groups/archive
 groups/create
 groups/get
@@ -67,9 +69,7 @@ memory/list
 memory/remove
 memory/update
 messaging/status
-models/connect
 models/credentials
-models/disconnect
 models/list
 models/setDefault
 organizations/create
@@ -82,6 +82,7 @@ pages/pin
 pages/remove
 pages/rename
 pages/setVisibility
+preferences/adoptTimezone
 routines/create
 routines/history
 routines/list
@@ -106,6 +107,7 @@ spaces/create
 spaces/list
 threads/answer
 threads/clear
+threads/get
 threads/markRead
 threads/markUnread
 threads/messages
