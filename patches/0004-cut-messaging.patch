@@ -1,44 +1,27 @@
 diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
-index e008711..b34e2c6 100644
+index 446c5cd4c..4a263d7da 100644
 --- a/apps/api/src/app.ts
 +++ b/apps/api/src/app.ts
-@@ -26,7 +26,6 @@ import type {
-   UserDeviceGateway,
- } from "@rakazo/adapters";
- import {
--  ChatSdkMessagingSurface,
+@@ -28,7 +28,6 @@ import {
+   BillingEmulator,
    CodexCatalogCache,
+   closeServerFoundation,
+-  configuredMessaging,
    contentKeyProviderFromEnv,
    createAgentHomeStore,
-@@ -49,9 +48,6 @@ import {
-   GraphileJobPublisher,
-   InMemoryJobQueue,
-   InMemoryRealtimeFanout,
--  installedMessaging,
--  isMessagingSurfaceEnabled,
--  messagingPlatformsFromEnv,
-   ObjectAgentHomeStore,
-   PiAgentRuntime,
-   PiOAuthLogins,
-@@ -146,7 +142,6 @@ import { startHourlySweep } from "./hourly-sweep.js";
- import { trackInFlightRequests } from "./in-flight-requests.js";
- import { mountLocalComputerHost } from "./local-settings.js";
- import { moveMcpArgsIntoSecrets } from "./mcp-args-migration.js";
--import { startMessagingRuntime } from "./messaging-runtime.js";
- import { monitoringRoutes } from "./monitoring.js";
- import { mountApiRequestBodyLimits, rpcBodyLimit } from "./request-body-limit.js";
- import { createRouter } from "./router.js";
-@@ -157,7 +152,6 @@ import { createAuthResponseAudit } from "./security-audit.js";
- import { mountSharedPages } from "./shared-pages.js";
- import { afterSpaceDeparture } from "./space-departure.js";
- import { createSpeechSummarizer } from "./speech-summary.js";
--import { settleWithTimeout } from "./team-chat-startup.js";
- import { endUserDeviceSession, mountUserDeviceRoutes } from "./user-devices.js";
- import { mountVoiceHttpRoutes } from "./voice.js";
- import { mountWebhookHttpRoutes } from "./webhook.js";
-@@ -178,6 +172,25 @@ export const MOBILE_AUTH_ORIGINS = [
- // Deploys give the old API 30 seconds to stop before killing it.
- const REQUEST_DRAIN_MS = 20_000;
+   createArtifactStore,
+@@ -145,8 +144,6 @@ import { moveMcpArgsIntoSecrets } from "./integrations/mcp-args-migration.js";
+ import { mountMeetingCalendarHttp } from "./meetings/calendar/calendar-routes.js";
+ import { createMeetingAnswers } from "./meetings/meeting-answers.js";
+ import { mountMeetingWebhook } from "./meetings/meeting-routes.js";
+-import { startMessagingRuntime } from "./messaging/messaging-runtime.js";
+-import { settleWithTimeout } from "./messaging/team-chat-startup.js";
+ import { recordSignInEnded } from "./models/model-connect-analytics.js";
+ import { createRouter, routerEnv } from "./router.js";
+ import { handleHttpError } from "./rpc-errors.js";
+@@ -156,6 +153,25 @@ import { cspReportRoutes } from "./telemetry/csp-report.js";
+ import { monitoringRoutes } from "./telemetry/monitoring.js";
+ import { mountWebhookHttpRoutes } from "./webhooks/webhook.js";
  
 +// Same behaviour as team-chat-startup.ts's settleWithTimeout, copied here so the composition does
 +// not import the team-chat module (spec 11.2, patch 0004).
@@ -59,36 +42,45 @@ index e008711..b34e2c6 100644
 +  });
 +}
 +
- export interface AppHandles {
-   app: Hono;
-   prisma: PrismaClient;
-@@ -388,21 +401,10 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+ // A stop that hands runs back is allowed 30 seconds before the process is killed.
+ const REQUEST_DRAIN_MS = 20_000;
+ 
+@@ -341,18 +357,10 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
    void home.removeStaleStaging().catch((error) => getLogger().error("home staging cleanup", error));
    const artifacts = createArtifactStore(env.dataDir, prisma);
    const memory = new MarkdownMemoryStore(prisma);
--  // This process registers the inbound sink, so it must hold Telegram's getUpdates connection.
--  const messagingPlatforms = messagingPlatformsFromEnv(env, { pollInboundMessages: true }).filter(
--    (platform) => platform.provider !== "slack" || !env.slackClientId,
--  );
--  const legacyMessaging =
--    messagingOverride ??
--    (isMessagingSurfaceEnabled(messagingPlatforms, {
--      deploymentModelConfigured: env.deploymentModelConfigured,
--      openSignup: env.messagingOpenSignup,
--    })
--      ? new ChatSdkMessagingSurface(messagingPlatforms)
--      : undefined);
 -  const { messaging, installations: messagingInstallations } = messagingOverride
 -    ? { messaging: messagingOverride, installations: undefined }
--    : installedMessaging(prisma, secrets, env, legacyMessaging, jobs);
+-    : configuredMessaging({
+-        prisma,
+-        secrets,
+-        jobs,
+-        env,
+-        deploymentModelConfigured: env.deploymentModelConfigured,
+-        openSignup: env.messagingOpenSignup,
+-        // This process registers the inbound sink, so it must hold Telegram's getUpdates connection.
+-        pollInboundMessages: true,
+-      });
 +  // Spec 11.2: messaging apps and the team-chat bridge are cut (patch 0004). No messaging surface is
 +  // built and nothing starts, so messaging/status answers "none". messagingOverride is kept for tests.
 +  const messaging: MessagingSurface | undefined = messagingOverride;
 +  const messagingInstallations: undefined = undefined;
-   const configuredEmail = emailOverride ?? configuredEmailProvider(env);
-   const localEmailEmulator =
-     !configuredEmail && env.emailEmulator
-@@ -921,14 +923,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+   const { email, localEmailEmulator, lifecycleEmailKinds, botEmail } = apiEmail(env, {
+     override: emailOverride,
+     singleProcess: Boolean(inMemoryJobs),
+@@ -560,9 +568,8 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+             })
+           : undefined,
+       messaging,
+-      isMessagingInstallationActive: messagingInstallations
+-        ? (id: string) => messagingInstallations.isActive(id)
+-        : undefined,
++      // Sticks: no messaging installations (patch 0004).
++      isMessagingInstallationActive: undefined,
+       cloudAgent,
+       userDevices: botUserDevices,
+       paymentWallet,
+@@ -811,14 +818,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
        trustedOrigin: (origin) => isTrustedOrigin(origin, env),
      });
    }
@@ -100,37 +92,48 @@ index e008711..b34e2c6 100644
 -      return c.redirect(target.toString());
 -    });
 -  }
-   app.use(
-     "/rpc/*",
-     clientBuildMiddleware({
-@@ -979,22 +973,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+   mountRpcRoute(app, router, requestSession, env);
+   mountAuditExportRoute(app, { prisma, sessionActor });
+   mountVoiceHttpRoutes(app, { prisma, secrets, env }, (c) => sessionActor(c.req.raw));
+@@ -834,24 +833,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
        authenticate: sessionActor,
      });
    }
--  const messagingRuntime = messaging
--    ? await startMessagingRuntime({
--        app,
--        prisma,
--        events,
--        jobs,
--        sandbox,
--        secrets,
--        artifacts,
--        runtime,
--        env,
--        messaging,
--        messagingInstallations,
--      })
--    : undefined;
+-  const messagingRuntime =
+-    messaging && messagingDelivery && teamChat
+-      ? await startMessagingRuntime({
+-          app,
+-          prisma,
+-          events,
+-          jobs,
+-          sandbox,
+-          secrets,
+-          artifacts,
+-          env,
+-          messaging,
+-          messagingInstallations,
+-          delivery: messagingDelivery,
+-          teamChat,
+-        })
+-      : undefined;
 -
    app.route(
      "/",
      healthRoutes(
-@@ -1048,7 +1026,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
-       const runsStopped = runs?.stop();
-       await userDeviceHub?.close();
-       oauthLogins.abortAll();
--      await messagingRuntime?.stop();
-       await stopHomeRetention?.();
-       await stopOrganizationDeletions();
-       await reconciler?.stop();
+@@ -899,8 +880,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+         shutdown.abort();
+         // Aborted runs hand themselves back while realtime is still open to announce them.
+         const runsStopped = runs?.stop();
+-        // The next release polls for chat messages now; replies from turns still running send.
+-        await messagingRuntime?.stopReceiving();
+         await options.connectionsClosed;
+         // Handlers still running would otherwise query the pool after it ends.
+         const requestsSettled = settleWithTimeout(inFlight.settled(), REQUEST_DRAIN_MS);
+@@ -913,7 +892,6 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
+         await oauthTokenUpgrade;
+         await mcpArgsMove;
+         await runsStopped;
+-        await messagingRuntime?.stop();
+         await requestsSettled;
+         await botEmail?.drain?.();
+         await email?.drain?.();

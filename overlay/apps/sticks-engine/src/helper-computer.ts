@@ -4,7 +4,7 @@
 // socket and no supervisor are involved. It reports graphical: false (inherited).
 import { createConnection } from "node:net";
 import { liveScripts } from "./activity.js";
-import { DesktopSandboxProvider } from "../../../packages/adapters/src/desktop-sandbox.ts";
+import { DesktopSandboxProvider } from "../../../packages/adapters/src/providers/computer/desktop/desktop-sandbox.ts";
 import type {
   AdapterContext,
   CommandRequest,

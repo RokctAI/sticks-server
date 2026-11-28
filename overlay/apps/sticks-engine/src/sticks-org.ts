@@ -13,7 +13,7 @@
 // secrets (upstream's secret store) are NOT re-encrypted yet: on a docker with another content_key they must be
 // entered again. Exit 0 on success, 1 on failure (the reason on stderr, never a secret). Caller: control's move runner.
 import { readFileSync, writeFileSync } from "node:fs";
-import { createPool } from "../../../packages/db/src/client.ts";
+import { createPool } from "../../../packages/db/src/database/client.ts";
 import { databaseUrlWithPassword, readSecret, SECRETS_DIR } from "./config.js";
 import { exportOrg, importOrg } from "./org-move.js";
 import { exportEngineRows, importEngineRows, type EngineRows } from "./engine-rows.js";

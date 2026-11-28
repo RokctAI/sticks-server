@@ -1,8 +1,8 @@
-diff --git a/packages/adapters/src/builtin-skills.ts b/packages/adapters/src/builtin-skills.ts
-index 386e603..dca001f 100644
---- a/packages/adapters/src/builtin-skills.ts
-+++ b/packages/adapters/src/builtin-skills.ts
-@@ -29,7 +29,6 @@ const RAKAZO_DOCS: ReadonlyArray<readonly [topics: string, url: string]> = [
+diff --git a/packages/adapters/src/tools/builtin-skills.prompt.ts b/packages/adapters/src/tools/builtin-skills.prompt.ts
+index 81045b35f..4ef25ac8a 100644
+--- a/packages/adapters/src/tools/builtin-skills.prompt.ts
++++ b/packages/adapters/src/tools/builtin-skills.prompt.ts
+@@ -32,7 +32,6 @@ const RAKAZO_DOCS: ReadonlyArray<readonly [topics: string, url: string]> = [
    ["Desktop app", "https://rakazo.com/docs/desktop-app.md"],
    ["Mobile app", "https://rakazo.com/docs/mobile-app.md"],
    ["Bots that create and manage bots", "https://rakazo.com/docs/fleet-management.md"],

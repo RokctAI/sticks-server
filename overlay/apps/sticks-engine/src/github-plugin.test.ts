@@ -3,7 +3,7 @@
 // loads, which calls are reads, which need approval, and that every call carries the credential.
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { connectorToolRequiresApproval } from "../../../packages/core/src/action-approval.ts";
+import { connectorToolRequiresApproval } from "../../../packages/core/src/runs/action-approval.ts";
 
 type Operation = { operationId: string; security?: unknown[]; summary?: string };
 type Spec = {

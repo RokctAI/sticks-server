@@ -36,9 +36,9 @@ import { saveStickToken, setUpStickAccount, StickAccountError, stickToken, STICK
 import { fetchForSite } from "./pulsar-site-fetch.js";
 import { DrainState, SiteDrainState, drainFlag, drainingOrgs } from "./drain.js";
 import { applyDutyChange, DutyError, dutyPluginDocument, dutyState, DutyStore } from "./duty.js";
-import { routineGates } from "../../../packages/adapters/src/run-routines.ts";
-import { runFinishedHooks } from "../../../packages/db/src/events.ts";
-import { runAsSystem } from "../../../packages/db/src/row-security.ts";
+import { routineGates } from "../../../packages/adapters/src/runs/assembly/run-routines.ts";
+import { runFinishedHooks } from "../../../packages/db/src/threads/events.ts";
+import { runAsSystem } from "../../../packages/db/src/database/row-security.ts";
 import { routineWakeupJob, runContinueJob } from "../../../packages/adapter-kit/src/index.ts";
 import { KeepGoingStore } from "./keep-going.js";
 import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, queueFollowUpDurable, readGoal, setGoal, type FollowUpDeps, type RunFinished, type SnapshotReader } from "./keep-going-wiring.js";
@@ -98,7 +98,8 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     realtime: new InMemoryRealtimeFanout(),
     // The memory job driver is the supported single-process mode (spec 11.1).
     wakeupDriver: "memory",
-    ticketBoardEnabled: true,
+    // The ticket board moved behind Labs upstream (v0.12); Sticks keeps it on for every account.
+    deploymentLabs: ["board"],
     logger,
     // Commands and files for computers go to the sandbox helper when STICKS_COMPUTER=helper (brief task 16).
     sandbox: helperSandboxFromEnv(env),

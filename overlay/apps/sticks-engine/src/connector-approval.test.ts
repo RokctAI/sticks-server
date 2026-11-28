@@ -1,10 +1,10 @@
 // Apps without a plugin (spec 4.7; brief task 20). These are the approval rules a connector's tools are
-// judged by, tested against upstream's own functions in packages/core/src/action-approval.ts.
+// judged by, tested against upstream's own functions in packages/core/src/runs/action-approval.ts.
 //
 // Read actions run freely; write actions ask for approval. A declared write always asks, even when its
 // name looks like a read; a declared read does not relax the name check.
 import { describe, expect, it } from "vitest";
-import { connectorToolRequiresApproval, toolRequiresApproval } from "../../../packages/core/src/action-approval.ts";
+import { connectorToolRequiresApproval, toolRequiresApproval } from "../../../packages/core/src/runs/action-approval.ts";
 
 describe("connector tools: read runs freely, write asks (brief task 20)", () => {
   it("a declared read of a read-looking name runs without approval", () => {

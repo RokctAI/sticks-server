@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { request as httpRequest, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { createClientIpResolver } from "../../api/src/client-ip.js";
+import { createClientIpResolver } from "../../api/src/http/client-ip.js";
 import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
 import { type NodeEnv, serveFetch, waitForDrain } from "./serve.js";
