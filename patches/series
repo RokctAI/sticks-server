@@ -11,3 +11,5 @@
 0008-stamp-turn-time-on-every-reply.patch
 0009-browse-freely-per-bot.patch
 0010-prompt-injection-guards.patch
+0012-reject-malformed-content-length-headers-in-bounded.patch
+0013-validate-zip-eocd-comment-length-in-agent-import-a.patch
