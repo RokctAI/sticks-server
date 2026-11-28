@@ -275,3 +275,44 @@ describe("the self-test (brief task 15)", () => {
     expect(await probe({ label: "closed", host: "127.0.0.1", port })).toBe(false);
   });
 });
+
+describe("hidden files (Ray, 2026-11-28)", () => {
+  it("blocks dot-files and dot-folders, allows a short read-only list", async () => {
+    const { hiddenStatus, assertNotHidden, commandTouchesSecrets, safeHiddenRead } = await import("./policy.js");
+    expect(hiddenStatus("notes/a.txt")).toBe("visible");
+    expect(hiddenStatus(".env")).toBe("blocked");
+    expect(hiddenStatus("app/.git/config")).toBe("blocked");
+    expect(hiddenStatus(".ssh/id_rsa")).toBe("blocked");
+    expect(hiddenStatus(".gitignore")).toBe("allowed");
+    expect(hiddenStatus("app/.gitignore")).toBe("allowed");
+    expect(hiddenStatus(".git/.gitignore")).toBe("blocked");
+    expect(() => assertNotHidden(".gitignore", "write")).toThrow("read-only");
+    expect(() => assertNotHidden(".env", "read")).toThrow("hidden");
+    expect(commandTouchesSecrets("cat .env")).toBe(true);
+    expect(commandTouchesSecrets("cp -r ~/.ssh out")).toBe(true);
+    expect(commandTouchesSecrets("cat .env.example")).toBe(false);
+    expect(commandTouchesSecrets("ls notes")).toBe(false);
+    const read = safeHiddenRead(".gitignore", Buffer.from("node_modules​\n"));
+    expect(read).toContain("<untrusted_file name=\".gitignore\">");
+    expect(read).not.toContain("​");
+    expect(() => safeHiddenRead(".gitignore", Buffer.alloc(70 * 1024))).toThrow("too large");
+  });
+
+  it("list hides dot entries and read refuses them", async () => {
+    if (!POSIX) return;
+    const root = await mkdtemp(join(tmpdir(), "sticks-hidden-"));
+    const home = join(root, "s1");
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, ".env"), "SECRET=1");
+    await writeFile(join(home, ".gitignore"), "dist");
+    await writeFile(join(home, "a.txt"), "hi");
+    const listed = await handleRequest(root, { id: "1", op: "list", stickId: "s1" } as never);
+    const names = (listed as { result: { entries: { name: string }[] } }).result.entries.map((e) => e.name).sort();
+    expect(names).toEqual([".gitignore", "a.txt"]);
+    const env = await handleRequest(root, { id: "2", op: "read", stickId: "s1", path: ".env" } as never);
+    expect(env.ok).toBe(false);
+    const exec = await handleRequest(root, { id: "3", op: "exec", stickId: "s1", command: "cat .env" } as never);
+    expect(exec.ok).toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+});
