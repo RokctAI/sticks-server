@@ -157,6 +157,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workdir", required=True, help="folder to build in (missing or empty)")
     ap.add_argument("--tag", help="build this release tag instead of upstream.pin's TAG")
+    ap.add_argument("--skip-patch", action="append",
+                    help="leave out this patch (one copied from an upstream PR the tag already holds); repeatable")
     ap.add_argument("--no-tests", action="store_true",
                     help="skip the overlay tests (the image build: some tests need Docker, and CI's engine job runs them)")
     args = ap.parse_args()
@@ -183,6 +185,8 @@ def main() -> int:
 
     step("apply patches/series")
     series = up.parse_series((ROOT / "patches" / "series").read_text(encoding="utf-8"))
+    # Patches copied from upstream PRs that this tag already holds (the sync passes them).
+    series = [n for n in series if n not in set(args.skip_patch or [])]
     applied, problems = up.apply_patches(checkout, ROOT / "patches", series)
     if problems:
         print("\n".join(problems), file=sys.stderr)

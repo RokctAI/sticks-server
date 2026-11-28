@@ -10,6 +10,9 @@ $result
 ## Our patches
 $patches
 
+## Patches copied from upstream PRs
+$carried
+
 ## Contract check (procedures our app calls)
 $contract
 

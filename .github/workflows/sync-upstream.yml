@@ -42,7 +42,7 @@ jobs:
           git config user.name "sync-upstream"
           git config user.email "sync-upstream@users.noreply.github.com"
           git checkout -b "$branch"
-          git add upstream.pin
+          git add upstream.pin patches/
           git commit -m "Move upstream pin to $tag"
           git push origin "$branch"
           gh pr create --draft --base main --head "$branch" --title "Move upstream pin to $tag" --body-file report.md

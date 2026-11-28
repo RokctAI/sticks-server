@@ -91,6 +91,85 @@ def reviewed_tag(path: Path | None = None) -> str:
         return ""
 
 
+UPSTREAM_PR_RE = re.compile(r"^Upstream:\s*([\w.-]+/[\w.-]+)#(\d+)\s*$", re.MULTILINE)
+
+
+def upstream_pr(patch_text: str) -> tuple[str, int] | None:
+    """The upstream PR a patch was copied from, from its header line `Upstream: owner/repo#N`.
+
+    Only the header (the text before the first `diff --git`) counts; our own patches have no such line.
+    """
+    head = patch_text.split("\ndiff --git ", 1)[0] if not patch_text.startswith("diff --git ") else ""
+    m = UPSTREAM_PR_RE.search(head)
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def carried_prs(patches_dir: Path, series: list[str]) -> list[tuple[str, str, int]]:
+    """(patch file, repo, PR number) for every patch in the series copied from an upstream PR."""
+    out = []
+    for name in series:
+        p = patches_dir / name
+        found = upstream_pr(p.read_text(encoding="utf-8", errors="replace")) if p.is_file() else None
+        if found:
+            out.append((name, found[0], found[1]))
+    return out
+
+
+def github_json(path: str) -> dict | None:
+    """GET a public GitHub API path; None when it cannot be read."""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "sticks-server-ci"}
+    token = os.environ.get("GH_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(f"https://api.github.com/{path}", headers=headers),
+                                    timeout=20) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def pr_status(repo: str, pr: int, tag: str, fetch=github_json) -> str:
+    """Where an upstream PR stands for `tag`: in_tag, merged_not_released, open, closed_unmerged or unknown.
+
+    in_tag means the PR's merge commit is part of the tag, so the tag already holds the change.
+    """
+    data = fetch(f"repos/{repo}/pulls/{pr}")
+    if not data:
+        return "unknown"
+    if data.get("merged_at") and data.get("merge_commit_sha"):
+        cmp = fetch(f"repos/{repo}/compare/{data['merge_commit_sha']}...{tag}")
+        if not cmp:
+            return "unknown"
+        return "in_tag" if cmp.get("status") in ("ahead", "identical") else "merged_not_released"
+    return "open" if data.get("state") == "open" else "closed_unmerged"
+
+
+PR_STATUS_TEXT = {
+    "in_tag": "is in `{tag}`: our copy is dropped when the pin moves to `{tag}`",
+    "merged_not_released": "is merged upstream but not in a release yet: keep our copy",
+    "open": "is still open upstream: keep our copy",
+    "closed_unmerged": "was CLOSED WITHOUT MERGING upstream: decide whether to keep our copy",
+    "unknown": "could not be checked (GitHub API unreadable): keep our copy",
+}
+
+
+def format_carried(rows: list[tuple[str, str, int, str]], tag: str) -> str:
+    if not rows:
+        return "None: no patch names an upstream PR (`Upstream: owner/repo#N`)."
+    return "\n".join(f"- `{name}` from {repo}#{pr} {PR_STATUS_TEXT[status].format(tag=tag)}"
+                     for name, repo, pr, status in rows)
+
+
+def drop_patches(patches_dir: Path, names: list[str]) -> None:
+    """Remove patches upstream now holds: their series lines and their files."""
+    series_file = patches_dir / "series"
+    lines = series_file.read_text(encoding="utf-8").splitlines()
+    series_file.write_text("\n".join(l for l in lines if l.strip() not in names) + "\n", newline="\n")
+    for name in names:
+        (patches_dir / name).unlink(missing_ok=True)
+
+
 def app_reviewed_for(tag: str, path: Path | None = None) -> bool:
     """The pin may move to `tag` only once the app has caught up with that release or a later one."""
     want, have = tag_key(tag), tag_key(reviewed_tag(path))
@@ -452,10 +531,13 @@ def engine_outcome(build_rc: int) -> int | None:
     return EXIT_ENGINE_BROKEN
 
 
-def build_overlay(tag: str, workdir: Path) -> tuple[int, str]:
+def build_overlay(tag: str, workdir: Path, skip: list[str] | None = None) -> tuple[int, str]:
     """Run scripts/build_engine.py against `tag` in a fresh folder. Returns (exit code, report text)."""
     script = ROOT / "scripts" / "build_engine.py"
-    r = run([sys.executable, str(script), "--workdir", str(workdir), "--tag", tag], check=False)
+    cmd = [sys.executable, str(script), "--workdir", str(workdir), "--tag", tag]
+    for name in skip or []:
+        cmd += ["--skip-patch", name]
+    r = run(cmd, check=False)
     lines = (r.stdout + r.stderr).strip().splitlines()
     tail = "\n".join(lines[-60:]) or "(no output)"
     return r.returncode, f"The build of `{tag}` exited {r.returncode} (0 = builds, typechecks and overlay tests pass).\n\n```\n{tail}\n```"
@@ -503,6 +585,10 @@ def main() -> int:
         "source": source,
         "date": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
+    series = parse_series((ROOT / "patches" / "series").read_text())
+    carried = [(n, r, p, pr_status(r, p, new_tag)) for n, r, p in carried_prs(ROOT / "patches", series)]
+    values["carried"] = format_carried(carried, new_tag)
+    in_new_tag = [n for n, _, _, status in carried if status == "in_tag"]
     if tag_key(new_tag) <= tag_key(pinned):
         values.update(status="UP TO DATE", result="Nothing newer than the pin.", patches="-", contract="-",
                       changelog="-", changes="-", next_steps="Nothing to do.")
@@ -516,8 +602,8 @@ def main() -> int:
         clone_tag(pin, new_tag, checkout)
         commit = run(["git", "rev-parse", "HEAD"], cwd=checkout).stdout.strip()
 
-        series = parse_series((ROOT / "patches" / "series").read_text())
-        applied, problems = apply_patches(checkout, ROOT / "patches", series)
+        # A patch copied from an upstream PR that the new tag already holds is not applied on it.
+        applied, problems = apply_patches(checkout, ROOT / "patches", [n for n in series if n not in in_new_tag])
         if problems:
             code = 20
             patches_txt = "\n".join([f"Applied: {', '.join(applied) or 'none'}", ""] + problems)
@@ -542,7 +628,7 @@ def main() -> int:
 
         engine_txt = "Not built: a patch does not apply, so there is no overlay build to check."
         if code != 20:
-            build_rc, engine_txt = build_overlay(new_tag, work / "engine")
+            build_rc, engine_txt = build_overlay(new_tag, work / "engine", in_new_tag)
             outcome = engine_outcome(build_rc)
             if outcome is not None and code == 10:  # a contract break (30) already says more, so it keeps priority
                 code = outcome
@@ -569,6 +655,9 @@ def main() -> int:
             elif args.write_pin:
                 try:
                     write_pin(ROOT / "upstream.pin", pin, new_tag, commit)
+                    if in_new_tag:
+                        drop_patches(ROOT / "patches", in_new_tag)
+                        result += f" Dropped, because `{new_tag}` holds them: {', '.join(in_new_tag)}."
                 except RuntimeError as exc:
                     code = 2
                     status, result = "NOT READY", f"`{new_tag}` passes our checks but the pin was NOT written: {exc}."
@@ -597,6 +686,7 @@ def main() -> int:
 def emit(values: dict[str, str], report: str | None) -> None:
     values.setdefault("db_roles", "-")
     values.setdefault("engine_build", "-")
+    values.setdefault("carried", "-")
     text = Template((ROOT / "templates" / "report.md").read_text()).safe_substitute(values)
     if report:
         Path(report).write_text(text)
