@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { nextCronDate } from "../../../packages/core/src/cron.ts";
+import { nextCronDate } from "../../../packages/core/src/routines/schedule.ts";
 import type { SqlQuery } from "./plugin-draft-store.js";
 
 /** The routine's name; also how we find it again, so the owner may rename it to stop us re-adding it. */

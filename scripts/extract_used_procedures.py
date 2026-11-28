@@ -24,7 +24,7 @@ MEDIA = {"application", "image", "text", "audio", "video", "font", "multipart", 
 HEADER = [
     "# Server procedures our Dart app calls, as group/name, taken from the string literals in",
     "# agent/dart/lib/src/sticks. The sync robot checks every line still exists in the new upstream",
-    "# tag's packages/contracts/src/rpc.ts. Regenerate with scripts/extract_used_procedures.py --write.",
+    "# tag's contract router (packages/contracts/src). Regenerate with scripts/extract_used_procedures.py --write.",
 ]
 
 

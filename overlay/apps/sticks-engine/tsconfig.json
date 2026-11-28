@@ -3,7 +3,15 @@
   "compilerOptions": {
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "declaration": false,
+    "declarationMap": false
   },
-  "include": ["src/**/*.ts", "sandbox/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "sandbox/**/*.ts"
+  ]
 }

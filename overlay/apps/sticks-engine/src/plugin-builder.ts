@@ -5,7 +5,7 @@
 //
 // This module is the pure part: the conversion, the name rule and the call gate. Registering the built-in
 // skill and storing drafts are not here yet (BLOCKED, see the PR).
-import { connectorToolRequiresApproval } from "../../../packages/core/src/action-approval.ts";
+import { connectorToolRequiresApproval } from "../../../packages/core/src/runs/action-approval.ts";
 
 /** The plugin name rule from upstream's docs/build-a-plugin.md: 1-64 lowercase letters, digits, dots or hyphens;
  * starts and ends with a letter or digit; no "--" and no "..". */

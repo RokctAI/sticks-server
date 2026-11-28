@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { LocalKeyProvider, masterKeysFromEnv } from "../../../packages/db/src/content-keys.ts";
+import { LocalKeyProvider, masterKeysFromEnv } from "../../../packages/db/src/encryption/content-keys.ts";
 import {
   masterKeyFromContentKey,
   rewrapForMove,

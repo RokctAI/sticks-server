@@ -1,10 +1,10 @@
 diff --git a/apps/api/src/routes/organizations.ts b/apps/api/src/routes/organizations.ts
-index 0e98724..13b0ab1 100644
+index 9992dbdb0..920939565 100644
 --- a/apps/api/src/routes/organizations.ts
 +++ b/apps/api/src/routes/organizations.ts
-@@ -15,6 +15,14 @@ import {
- import { deleteOrganization } from "../account-deletion.js";
- import type { RouterContext } from "./context.js";
+@@ -30,6 +30,14 @@ function invitationUrl(deps: RouterDeps, invitationId: string): string {
+   return new URL(`/join/${invitationId}`, deps.env.webOrigin).toString();
+ }
  
 +// Sticks: one organization per tenant, created by the platform (patch 0002). The app's create call
 +// is refused with this error; the code below it is kept, not deleted.
@@ -17,7 +17,7 @@ index 0e98724..13b0ab1 100644
  export function organizationsRoutes(ctx: RouterContext) {
    const { deps, authed } = ctx;
    return {
-@@ -26,6 +34,7 @@ export function organizationsRoutes(ctx: RouterContext) {
+@@ -41,6 +49,7 @@ export function organizationsRoutes(ctx: RouterContext) {
        ),
        create: authed.organizations.create.handler(({ context, input }) =>
          runAsSystem("create an organization for its owner", async () => {
@@ -26,29 +26,29 @@ index 0e98724..13b0ab1 100644
            try {
              organization = await createOrganizationForUser(deps.prisma, {
 diff --git a/apps/api/src/routes/spaces.ts b/apps/api/src/routes/spaces.ts
-index c09d147..968c832 100644
+index 14d11a484..b806e0f75 100644
 --- a/apps/api/src/routes/spaces.ts
 +++ b/apps/api/src/routes/spaces.ts
-@@ -47,6 +47,14 @@ import { resolveThreadTarget } from "../thread-target.js";
+@@ -39,6 +39,14 @@ import { resolveThreadTarget } from "../threads/thread-target.js";
  import type { RouterContext } from "./context.js";
  import { meDto } from "./shared.js";
  
-+// Sticks: one space per tenant, created by the platform (patch 0002). The app's create call is
-+// refused with this error; the code below it is kept, not deleted.
++// Sticks: one space per tenant, created by the platform (patch 0002). The app's create call
++// is refused with this error; the code below it is kept, not deleted.
 +function refuseSticksCreate(what: string): void {
 +  throw new ORPCError("FORBIDDEN", {
 +    message: `This Sticks has one ${what} and it is set up for you. Creating another is not available.`,
 +  });
 +}
 +
- function mapSpaceMemberError(error: unknown): never {
-   if (
-     error instanceof SpaceInviteNotFoundError ||
-@@ -104,6 +112,7 @@ export function spacesRoutes(ctx: RouterContext) {
+ /**
+  * Runs `fn` scoped to another of the actor's Spaces. Membership is checked first,
+  * so a client-supplied Space id never opens that Space's rows on its own.
+@@ -75,6 +83,7 @@ export function spacesRoutes(ctx: RouterContext) {
        // Seeds a Space whose id does not exist yet; the member limit is checked inside.
        create: authed.spaces.create.handler(({ context, input }) =>
          runAsSystem("create a Space for its member", async () => {
 +          refuseSticksCreate("space");
-           let space: { id: string; name: string };
-           try {
-             space = await createSpaceForMember(deps.prisma, {
+           const space = await createSpaceForMember(deps.prisma, {
+             currentSpaceId: context.actor.spaceId,
+             userId: context.actor.userId,

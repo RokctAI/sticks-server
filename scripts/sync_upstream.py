@@ -119,6 +119,18 @@ def used_procedures(text: str) -> list[str]:
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
+def contract_source(checkout: Path) -> str:
+    """The contract router's text: rpc.ts up to v0.11.0, then (from v0.12) the per-area files it was split into."""
+    src = checkout / "packages" / "contracts" / "src"
+    rpc = src / "rpc.ts"
+    if rpc.is_file():
+        return rpc.read_text()
+    if not src.is_dir():
+        return ""
+    files = sorted(p for p in src.rglob("*.ts") if not p.name.endswith(".test.ts"))
+    return "\n".join(p.read_text() for p in files)
+
+
 def contract_procedures(rpc_ts: str) -> set[str]:
     """Procedure names as group/name from upstream's contract router (packages/contracts/src/rpc.ts).
 
@@ -512,10 +524,10 @@ def main() -> int:
         else:
             patches_txt = f"All {len(applied)} patch(es) apply." if applied else "No patches (stock upstream)."
 
-        rpc = checkout / "packages" / "contracts" / "src" / "rpc.ts"
         used = used_procedures((ROOT / "contracts" / "used-procedures.txt").read_text())
-        if rpc.is_file():
-            have = contract_procedures(rpc.read_text())
+        rpc_text = contract_source(checkout)
+        if rpc_text:
+            have = contract_procedures(rpc_text)
             missing = [u for u in used if u not in have]
             if missing:
                 code = 30 if code == 10 else code
@@ -524,7 +536,7 @@ def main() -> int:
                 contract_txt = f"All {len(used)} procedures the app calls still exist."
         else:
             code = 30 if code == 10 else code
-            contract_txt = "packages/contracts/src/rpc.ts not found: upstream moved its contract; check by hand."
+            contract_txt = "No contract router found under packages/contracts/src: upstream moved its contract; check by hand."
 
         changes = compare_versions(checkout, pinned, new_tag)
 

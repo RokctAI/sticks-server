@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDb, createPool } from "../../../packages/db/src/client.ts";
+import { createDb, createPool } from "../../../packages/db/src/database/client.ts";
 
 const DB_URL = "postgres://engine:engine@127.0.0.1:9/engine";
 

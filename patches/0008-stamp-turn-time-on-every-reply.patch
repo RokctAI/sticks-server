@@ -1,7 +1,7 @@
-diff --git a/apps/web/src/lib/tool-activity-view.test.ts b/apps/web/src/lib/tool-activity-view.test.ts
-index 9e36972..34d83d2 100644
---- a/apps/web/src/lib/tool-activity-view.test.ts
-+++ b/apps/web/src/lib/tool-activity-view.test.ts
+diff --git a/apps/web/src/lib/chat/tool-activity-view.test.ts b/apps/web/src/lib/chat/tool-activity-view.test.ts
+index 9e36972d4..34d83d2b6 100644
+--- a/apps/web/src/lib/chat/tool-activity-view.test.ts
++++ b/apps/web/src/lib/chat/tool-activity-view.test.ts
 @@ -25,6 +25,8 @@ describe("tool card render decisions", () => {
    it("renders only steps blocks, and only when the preference is on", () => {
      expect(shouldRenderToolCard(stepsBlock, true)).toBe(true);
@@ -11,10 +11,10 @@ index 9e36972..34d83d2 100644
      expect(shouldRenderToolCard(textBlock, true)).toBe(false);
      expect(shouldRenderToolCard(liveActivity, true)).toBe(false);
    });
-diff --git a/apps/web/src/lib/tool-activity-view.ts b/apps/web/src/lib/tool-activity-view.ts
-index a95964d..c63a45d 100644
---- a/apps/web/src/lib/tool-activity-view.ts
-+++ b/apps/web/src/lib/tool-activity-view.ts
+diff --git a/apps/web/src/lib/chat/tool-activity-view.ts b/apps/web/src/lib/chat/tool-activity-view.ts
+index a95964d21..c63a45dd3 100644
+--- a/apps/web/src/lib/chat/tool-activity-view.ts
++++ b/apps/web/src/lib/chat/tool-activity-view.ts
 @@ -11,7 +11,8 @@ export function toolStepCount(steps: readonly { count: number }[]): number {
   * A `progress` block marked `activity: true` never renders, in either mode.
   */
@@ -27,7 +27,7 @@ index a95964d..c63a45d 100644
  /** Blocks that survive into a message render. */
 diff --git a/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql b/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql
 new file mode 100644
-index 0000000..af2de9f
+index 000000000..af2de9f0b
 --- /dev/null
 +++ b/packages/db/prisma/migrations/20261212120000_message_tool_work_idx_drop_old/migration.sql
 @@ -0,0 +1,4 @@
@@ -37,7 +37,7 @@ index 0000000..af2de9f
 +DROP INDEX CONCURRENTLY IF EXISTS "messages_tool_work_idx";
 diff --git a/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql b/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql
 new file mode 100644
-index 0000000..d5b8a63
+index 000000000..d5b8a636d
 --- /dev/null
 +++ b/packages/db/prisma/migrations/20261212120001_message_tool_work_idx_nonempty/migration.sql
 @@ -0,0 +1,4 @@
@@ -45,11 +45,29 @@ index 0000000..d5b8a63
 +-- Replies that used tools: a steps block with at least one step (see the previous migration).
 +CREATE INDEX CONCURRENTLY "messages_tool_work_idx" ON "messages" ("threadId", "seq")
 +WHERE "role" = 'bot' AND jsonb_path_exists("blocks", '$[*] ? (@.kind == "steps" && @.steps.size() > 0)');
-diff --git a/packages/db/src/events.test.ts b/packages/db/src/events.test.ts
-index 8a59dda..b49e6ad 100644
---- a/packages/db/src/events.test.ts
-+++ b/packages/db/src/events.test.ts
-@@ -98,6 +98,20 @@ describe("finalizeRun", () => {
+diff --git a/packages/db/src/history/history-retrieval.ts b/packages/db/src/history/history-retrieval.ts
+index 1747e6bfd..e082510f2 100644
+--- a/packages/db/src/history/history-retrieval.ts
++++ b/packages/db/src/history/history-retrieval.ts
+@@ -153,8 +153,11 @@ const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
+   '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result')::text || translate(jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "file" || @.kind == "image").name')::text, '._-', '   ') || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].label')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].note')::text`;
+ const columns = Prisma.sql`m.id, m.seq, m.role, m."runId", m."replyToMessageId", m."createdAt", m.blocks, m."threadId", t."groupId" AS "groupId"`;
+ 
+-/** Replies that used tools; matches the predicate of messages_tool_work_idx exactly. */
+-const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps")')`;
++/**
++ * Replies that used tools; matches the predicate of messages_tool_work_idx exactly. An empty steps block only
++ * carries a turn's time (a turn with no tools), so it does not count.
++ */
++const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps" && @.steps.size() > 0)')`;
+ function visible(scope: HistoryScope, myChats = false, targetThreadId?: string): Prisma.Sql {
+   // Match loadRunHistoryMessages: only an unassigned row for this bot means waiting.
+   // Cross-chat direct threads use their owning bot; groups retain the reading bot.
+diff --git a/packages/db/src/threads/events.test.ts b/packages/db/src/threads/events.test.ts
+index ce75b879e..280046606 100644
+--- a/packages/db/src/threads/events.test.ts
++++ b/packages/db/src/threads/events.test.ts
+@@ -104,6 +104,20 @@ describe("finalizeRun", () => {
      expect(completedRunBlocks(blocks, null, new Date())).toBe(blocks);
    });
  
@@ -70,11 +88,11 @@ index 8a59dda..b49e6ad 100644
    it.each(["completed", "failed"] as const)(
      "retries a transaction conflict and clears the checkpoint on %s without duplicating the terminal event or notification",
      async (outcome) => {
-diff --git a/packages/db/src/events.ts b/packages/db/src/events.ts
-index ff13014..a2654ea 100644
---- a/packages/db/src/events.ts
-+++ b/packages/db/src/events.ts
-@@ -726,7 +726,13 @@ export function completedRunBlocks(
+diff --git a/packages/db/src/threads/events.ts b/packages/db/src/threads/events.ts
+index 4b005eb2c..4d54c5e11 100644
+--- a/packages/db/src/threads/events.ts
++++ b/packages/db/src/threads/events.ts
+@@ -814,7 +814,13 @@ export function completedRunBlocks(
    const durationMs = completedAt.getTime() - startedAt.getTime();
    if (!Number.isFinite(durationMs) || durationMs < 0) return blocks;
    const index = blocks.findLastIndex((block) => block.kind === "steps");
@@ -89,21 +107,3 @@ index ff13014..a2654ea 100644
    return blocks.map((block, blockIndex) =>
      blockIndex === index && block.kind === "steps"
        ? { ...block, durationMs: Math.round(durationMs) }
-diff --git a/packages/db/src/history-retrieval.ts b/packages/db/src/history-retrieval.ts
-index 6ef13ff..89096b5 100644
---- a/packages/db/src/history-retrieval.ts
-+++ b/packages/db/src/history-retrieval.ts
-@@ -138,8 +138,11 @@ const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
-   '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result')::text || translate(jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "file" || @.kind == "image").name')::text, '._-', '   ') || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].label')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "steps").steps[*].note')::text`;
- const columns = Prisma.sql`m.id, m.seq, m.role, m."runId", m."replyToMessageId", m."createdAt", m.blocks, m."threadId", t."groupId" AS "groupId"`;
- 
--/** Replies that used tools; matches the predicate of messages_tool_work_idx exactly. */
--const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps")')`;
-+/**
-+ * Replies that used tools; matches the predicate of messages_tool_work_idx exactly. An empty steps block only
-+ * carries a turn's time (a turn with no tools), so it does not count.
-+ */
-+const TOOL_WORK = Prisma.sql`m.role = 'bot' AND jsonb_path_exists(m.blocks, '$[*] ? (@.kind == "steps" && @.steps.size() > 0)')`;
- function visible(scope: HistoryScope, myChats = false, targetThreadId?: string): Prisma.Sql {
-   // Match loadRunHistoryMessages: only an unassigned row for this bot means waiting.
-   // Cross-chat direct threads use their owning bot; groups retain the reading bot.

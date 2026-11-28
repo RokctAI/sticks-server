@@ -50,6 +50,11 @@ from `docker buildx imagetools inspect`) on 2026-11-15. On that pin, `scripts/sy
 all 131 procedures in `contracts/used-procedures.txt` present in upstream's `rpc.ts`, and no patches
 (stock upstream). The scheduled workflow is NOT yet run on GitHub. Nothing is deployed from here yet.
 
+Pin moved to `v0.16.0` (commit `6e24f7e6`) on 2026-11-28 (fixes issue #98). Upstream moved most files into
+subfolders after v0.11.0 (for example `packages/adapters/src/runs/...`, `packages/db/src/threads/...`) and
+split `packages/contracts/src/rpc.ts` into per-area `*-rpc.ts` files, so all ten patches were re-fitted and the
+overlay's deep imports updated. All 131 procedures the app calls still exist. Details: docs/repin-v0.16.0.md.
+
 ## Licence
 Apache License 2.0 (see `LICENSE`), the same licence as upstream Rakazo. `NOTICE` records the
 copyright and the upstream attribution. Any build or image made from upstream source plus our
