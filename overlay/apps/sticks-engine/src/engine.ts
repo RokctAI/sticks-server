@@ -43,6 +43,7 @@ import { routineWakeupJob, runContinueJob } from "../../../packages/adapter-kit/
 import { KeepGoingStore } from "./keep-going.js";
 import { completeGoal, GoalError, GOALS_TABLE_SQL, goalPluginDocument, keepGoingAfterRun, queueFollowUpDurable, readGoal, setGoal, type FollowUpDeps, type RunFinished, type SnapshotReader } from "./keep-going-wiring.js";
 import { FEATURES_TABLE_SQL, readFeatures, saveFeatures } from "./features.js";
+import { CATALOG_TABLE_SQL, readCatalog, saveCatalog } from "./app-catalog.js";
 import { answerRecordRequest, createRecordRequest, getRecordRequest, listRecordRequests, recordConfirmPluginDocument, RecordRequestError } from "./record-requests.js";
 
 const DB_PACKAGE_DIR = fileURLToPath(new URL("../../../packages/db", import.meta.url));
@@ -292,6 +293,23 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
     const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
     if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
     return c.json({ features: await readFeatures(sql) });
+  });
+
+  // Curated app catalog (Ray 11-28): hidden until the hub pushes the apps it has listed with every need satisfied.
+  // No secrets travel here. Pulsar posts with the engine secret; signed-in people read the list.
+  await sql(CATALOG_TABLE_SQL, []);
+  handles.app.post("/internal/catalog", async (c) => {
+    const secret = engineSecretFrom(dir);
+    if (secret === undefined || !bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+    return c.json(await saveCatalog(sql, await c.req.json().catch(() => ({}))));
+  });
+  handles.app.get("/internal/catalog", async (c) => {
+    const secret = engineSecretFrom(dir);
+    const bySecret = secret !== undefined && bearerMatches(c.req.header("authorization"), secret);
+    const raw = sessionTokenFrom(c.req.raw.headers);
+    const signed = raw ? ((await sql(`SELECT 1 FROM session WHERE token = $1 AND "expiresAt" > $2 LIMIT 1`, [raw, new Date()])) as unknown[]).length > 0 && !(await isGuestSession(sql, raw)) : false;
+    if (!bySecret && !signed) return c.json({ error: "unauthorized" }, 401);
+    return c.json(await readCatalog(sql));
   });
 
   // Many tenants in one engine (Ray 11-22). Pulsar's first start registers its tenant with the engine secret:
