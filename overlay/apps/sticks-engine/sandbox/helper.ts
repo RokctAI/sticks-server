@@ -10,7 +10,17 @@ import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join, sep } from "node:path";
-import { COMMAND_LIMITS, capOutput, insideHome, minimalEnv, stickHome } from "./policy.js";
+import {
+  COMMAND_LIMITS,
+  assertNotHidden,
+  capOutput,
+  commandTouchesSecrets,
+  hiddenStatus,
+  insideHome,
+  minimalEnv,
+  safeHiddenRead,
+  stickHome,
+} from "./policy.js";
 
 export type SandboxRequest =
   | { id: string; op: "exec"; stickId: string; command: string; timeoutMs?: number }
@@ -146,6 +156,7 @@ async function assertAncestorsInside(home: string, folder: string): Promise<void
 /** Runs one request. Every failure becomes an error reply; nothing is thrown to the socket. */
 /** Reads a file inside the Stick's folder, with the limits and checks every read uses. */
 async function readInside(home: string, requested: string): Promise<Buffer> {
+  assertNotHidden(requested, "read");
   const target = insideHome(home, requested);
   const info = await stat(target);
   if (!info.isFile()) throw new Error("not a file");
@@ -156,6 +167,7 @@ async function readInside(home: string, requested: string): Promise<Buffer> {
 
 /** Writes a file inside the Stick's folder. Refuses symlinks and any path that leaves the folder. */
 async function writeInside(home: string, requested: string, data: Buffer): Promise<void> {
+  assertNotHidden(requested, "write");
   const target = insideHome(home, requested);
   if (data.byteLength > COMMAND_LIMITS.fileBytes) throw new Error("content is too large");
   // Before anything is created: the nearest existing folder must resolve inside the home.
@@ -184,15 +196,21 @@ export async function handleRequest(root: string, request: SandboxRequest): Prom
         if (typeof request.command !== "string" || request.command.length === 0 || request.command.length > MAX_COMMAND_CHARS) {
           throw new Error("bad command");
         }
+        if (commandTouchesSecrets(request.command)) throw new Error("hidden files are not available to a Stick");
         const requested = request.timeoutMs ?? COMMAND_LIMITS.timeoutMs;
         const timeoutMs = Math.min(Math.max(requested, 1), COMMAND_LIMITS.maxTimeoutMs);
         return { id: request.id, ok: true, result: await runCommand(home, request.command, timeoutMs) };
       }
       case "read": {
         const bytes = await readInside(home, request.path);
-        return { id: request.id, ok: true, result: { content: bytes.toString("utf8") } };
+        const content =
+          hiddenStatus(request.path) === "allowed"
+            ? safeHiddenRead(request.path.split("/").pop() ?? "", bytes)
+            : bytes.toString("utf8");
+        return { id: request.id, ok: true, result: { content } };
       }
       case "readBytes": {
+        if (hiddenStatus(request.path) === "allowed") throw new Error("read this hidden file as text");
         const bytes = await readInside(home, request.path);
         return { id: request.id, ok: true, result: { base64: bytes.toString("base64") } };
       }
@@ -206,11 +224,14 @@ export async function handleRequest(root: string, request: SandboxRequest): Prom
         return { id: request.id, ok: true, result: { bytes: data.byteLength } };
       }
       case "list": {
+        if (request.path) assertNotHidden(request.path, "read");
         const target = request.path ? insideHome(home, request.path) : home;
         if (!(await resolvesInside(home, target))) throw new Error("path leaves the Stick's folder");
         const entries = await readdir(target, { withFileTypes: true });
+        // Hidden entries are left out, except allowed files.
+        const visible = entries.filter((entry) => !entry.name.startsWith(".") || (!entry.isDirectory() && hiddenStatus(entry.name) === "allowed"));
         const listed = await Promise.all(
-          entries.map(async (entry) => {
+          visible.map(async (entry) => {
             // lstat: a link is reported as a link, not as the size of what it points at.
             const info = await lstat(join(target, entry.name)).catch(() => null);
             return { name: entry.name, dir: entry.isDirectory(), size: info?.isFile() ? info.size : 0 };
