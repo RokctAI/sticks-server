@@ -28,6 +28,7 @@ import { providerKeysInEnv } from "./gateway.js";
 import { bearerMatches, engineSecretFrom, IdleTracker, pushIdle, readIdleInputs } from "./idle.js";
 import { liveScripts, openStreams } from "./activity.js";
 import { pulsarRequest, PulsarProxyError, seedPulsarPlugins } from "./pulsar-plugins.js";
+import { emailGatewayRequest, EmailProxyError, GATEWAY_PATH, seedEmailPlugin } from "./email-plugin.js";
 import { forwardVoice, voiceProxyToken } from "./voice-proxy.js";
 import { readGatewayKey } from "./gateway.js";
 import { addReaction, listReactions, ReactionError, reactionsPluginDocument } from "./reactions.js";
@@ -645,6 +646,42 @@ export async function startEngine(options: EngineStartOptions = {}): Promise<App
           return c.json(await setUpStickAccount(sql, (url, init) => siteFetch(url, init as { method?: string; headers?: Record<string, string>; body?: string }), pulsarUrl, adminToken, secret, { stickId: c.req.param("stick"), displayName: body.displayName, role: body.role, directors: body.directors }));
         } catch (error) {
           if (error instanceof StickAccountError) return c.json({ error: error.message }, error.status);
+          throw error;
+        }
+      });
+      await seedEmailPlugin(sqlDraftRepository(sql), engineUrl);
+      // Email plugin (email-plugin.ts): the Stick's own Pulsar account calls the one gateway with cmd; Pulsar picks
+      // the mailbox of the person in X-Requested-By and refuses a call nobody asked for.
+      handles.app.all("/internal/email/:op", async (c) => {
+        if (!bearerMatches(c.req.header("authorization"), secret)) return c.json({ error: "unauthorized" }, 401);
+        try {
+          const body = c.req.method === "GET" ? {} : ((await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+          const r = emailGatewayRequest(c.req.param("op"), c.req.method, new URL(c.req.url).searchParams, body);
+          const stick = c.req.header("x-sticks-stick") ?? "";
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(stick)) return c.json({ error: "which Stick is calling is required" }, 400);
+          const requestedBy = c.req.header("x-sticks-requested-by");
+          let token = await stickToken(sql, stick, secret);
+          if (!token) {
+            try {
+              token = readSecret(`pulsar_token_${stick}`, dir);
+            } catch {
+              return c.json({ error: "This Stick has no Pulsar account yet" }, 503);
+            }
+          }
+          const site = await pulsarSiteForStick(sql, stick);
+          if (!site && (await hasSharedTenants(sql))) return c.json({ error: "This Stick's tenant is not known on this docker" }, 503);
+          const res = await fetchForSite(site)(`${pulsarUrl}${GATEWAY_PATH}`, {
+            method: "POST",
+            headers: {
+              authorization: `token ${token}`,
+              "content-type": "application/json",
+              ...(requestedBy ? { "x-requested-by": requestedBy.slice(0, 140) } : {}),
+            },
+            body: JSON.stringify(r),
+          });
+          return new Response(await res.text(), { status: res.status, headers: { "content-type": "application/json" } });
+        } catch (error) {
+          if (error instanceof EmailProxyError) return c.json({ error: error.message }, error.status);
           throw error;
         }
       });
