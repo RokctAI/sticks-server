@@ -1,0 +1,105 @@
+diff --git a/packages/adapters/src/run-tool-gate.ts b/packages/adapters/src/run-tool-gate.ts
+index 4917e5785..880cb2d70 100644
+--- a/packages/adapters/src/run-tool-gate.ts
++++ b/packages/adapters/src/run-tool-gate.ts
+@@ -234,6 +234,7 @@ export async function gateToolCall(
+             (name === "web_fetch" && RAKAZO_DOCS_URLS.includes(fetchUrl)) ||
+             (await ctx.trust.loadTrustedSites()).has(fetchSite),
+           rules: await ctx.trust.loadApprovalRules(),
++          browsingBotId: name === "web_fetch" ? ctx.bot.id : undefined,
+         })
+       : "allow";
+   // A tool watch repeats its read unattended, so it passes the read check that call would now.
+diff --git a/packages/contracts/src/domain.ts b/packages/contracts/src/domain.ts
+index 8e36e931b..6f4bc932c 100644
+--- a/packages/contracts/src/domain.ts
++++ b/packages/contracts/src/domain.ts
+@@ -868,7 +868,7 @@ export type ConnectionCatalogItem = z.infer<typeof ConnectionCatalogItemSchema>;
+ export const ActionApprovalRuleSchema = z.object({
+   id: Id,
+   effect: z.enum(["always_allow", "require_approval", "deny"]),
+-  matchKind: z.enum(["tool", "connector", "category", "site"]),
++  matchKind: z.enum(["tool", "connector", "category", "site", "browse"]),
+   matchValue: z.string(),
+   createdAt: z.string(),
+ });
+diff --git a/packages/contracts/src/rpc.ts b/packages/contracts/src/rpc.ts
+index e78fb5b81..ccb5c70b1 100644
+--- a/packages/contracts/src/rpc.ts
++++ b/packages/contracts/src/rpc.ts
+@@ -1329,7 +1329,8 @@ export const appContract = {
+       .input(
+         settingsScopeInput.extend({
+           effect: z.enum(["always_allow", "require_approval", "deny"]),
+-          matchKind: z.enum(["tool", "connector", "site"]),
++          // "browse": matchValue is a bot id; that bot reads any site without asking.
++          matchKind: z.enum(["tool", "connector", "site", "browse"]),
+           matchValue: z.string().trim().min(1),
+         }),
+       )
+diff --git a/packages/core/src/action-approval.test.ts b/packages/core/src/action-approval.test.ts
+index 95309778e..78ca4be9e 100644
+--- a/packages/core/src/action-approval.test.ts
++++ b/packages/core/src/action-approval.test.ts
+@@ -1074,3 +1074,18 @@ describe("approvalRuleEffectChoices", () => {
+     expect(approvalRuleEffectChoices(rule("category", "email"))).toEqual([]);
+   });
+ });
++
++describe("browse freely", () => {
++  const rule = (matchKind: string, matchValue: string, effect = "always_allow") =>
++    ({ id: "r", createdAt: "", effect, matchKind, matchValue }) as never;
++  it("lets only the named bot read any site", () => {
++    const rules = [rule("browse", "BotA")];
++    expect(outboundSiteGate({ site: "news.test", trusted: false, rules, browsingBotId: "bota" })).toBe("allow");
++    expect(outboundSiteGate({ site: "news.test", trusted: false, rules, browsingBotId: "botb" })).toBe("new");
++    expect(outboundSiteGate({ site: "news.test", trusted: false, rules })).toBe("new");
++  });
++  it("needs an always-allow rule", () => {
++    const rules = [rule("browse", "bota", "deny")];
++    expect(outboundSiteGate({ site: "news.test", trusted: false, rules, browsingBotId: "bota" })).toBe("new");
++  });
++});
+diff --git a/packages/core/src/action-approval.ts b/packages/core/src/action-approval.ts
+index b80ce251a..9ee47dbad 100644
+--- a/packages/core/src/action-approval.ts
++++ b/packages/core/src/action-approval.ts
+@@ -304,8 +304,14 @@ export function outboundSiteGate(input: {
+   site: string;
+   trusted: boolean;
+   rules: ActionApprovalRule[];
++  /** The bot reading the site, given only for a read (web_fetch), never a paid request. */
++  browsingBotId?: string;
+ }): "allow" | "new" {
+-  return input.trusted || siteAlwaysAllowed(input.rules, input.site) ? "allow" : "new";
++  return input.trusted ||
++    siteAlwaysAllowed(input.rules, input.site) ||
++    browsesFreely(input.rules, input.browsingBotId)
++    ? "allow"
++    : "new";
+ }
+ 
+ /**
+@@ -326,6 +332,22 @@ export function newSiteOutcome(input: {
+  */
+ export const SITE_SENDING_TOOLS: ReadonlySet<string> = new Set(["web_fetch", "paid_request"]);
+ 
++/**
++ * "Browse freely" (per bot): an always-allow rule of kind "browse" naming the bot lets its
++ * web_fetch reads open any site without a card. Sending, logins, payments and posting are other
++ * tools and keep their own approval.
++ */
++export function browsesFreely(rules: ActionApprovalRule[], botId: string | undefined): boolean {
++  if (!botId) return false;
++  const id = botId.toLowerCase();
++  return rules.some(
++    (rule) =>
++      rule.effect === "always_allow" &&
++      rule.matchKind === "browse" &&
++      rule.matchValue.toLowerCase() === id,
++  );
++}
++
+ export function siteAlwaysAllowed(rules: ActionApprovalRule[], site: string): boolean {
+   return rules.some(
+     (rule) =>
