@@ -14,11 +14,16 @@ describe("hub feature switches", () => {
   it("everything is on until the hub says otherwise", async () => {
     expect(await readFeatures(db())).toEqual(ALL_ON);
   });
+  it("plugin building switches start off", async () => {
+    const f = await readFeatures(db());
+    expect(f.plugin_building).toBe(false);
+    expect(f.unsupported_service_plugins).toBe(false);
+  });
   it("a missing key keeps its last value; junk is ignored", async () => {
     const q = db();
     await saveFeatures(q, { voice_calls: false });
-    const f = await saveFeatures(q, { plugin_building: false, voice_calls: "no", other: true });
-    expect(f).toEqual({ ...ALL_ON, voice_calls: false, plugin_building: false });
+    const f = await saveFeatures(q, { plugin_building: true, voice_calls: "no", other: true });
+    expect(f).toEqual({ ...ALL_ON, voice_calls: false, plugin_building: true });
   });
   it("merge ignores non-objects", () => {
     expect(mergeFeatures(ALL_ON, null)).toEqual(ALL_ON);

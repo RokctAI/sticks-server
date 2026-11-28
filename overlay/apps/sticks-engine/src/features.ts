@@ -7,7 +7,9 @@ import type { SqlQuery } from "./plugin-draft-store.js";
 export const FEATURE_KEYS = ["plugin_building", "unsupported_service_plugins", "voice_calls", "hands_on"] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 export type Features = Record<FeatureKey, boolean>;
-export const ALL_ON: Features = { plugin_building: true, unsupported_service_plugins: true, voice_calls: true, hands_on: true };
+// Ray 11-28: a Stick never creates a plugin itself; people send a service request instead. Both plugin switches
+// start OFF (the code stays). The hub can still turn them on. Everything else is on until the hub says otherwise.
+export const ALL_ON: Features = { plugin_building: false, unsupported_service_plugins: false, voice_calls: true, hands_on: true };
 
 export const FEATURES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS sticks_features (
   id smallint PRIMARY KEY CHECK (id = 1),
